@@ -308,10 +308,10 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
   };
 
   const getFiliere = (group: string) => {
-    if (group.startsWith("DEV")) return "DEV";
-    if (group.startsWith("ID")) return "ID";
     if (group.startsWith("DEVOWFS")) return "DEVOWFS";
     if (group.startsWith("IDOSR")) return "IDOSR";
+    if (group.startsWith("DEV")) return "DEV";
+    if (group.startsWith("ID")) return "ID";
     return "Autre";
   };
 
