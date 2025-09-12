@@ -279,6 +279,16 @@ const RequestForm = () => {
               </>
             )}
           </Button>
+          <div className="mt-4 text-center">
+            <a
+              href="https://www.isfocasa.com/accueil"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary hover:text-primary/80 underline decoration-dotted"
+            >
+              Visitez le site officiel de l'ISFO Casa
+            </a>
+          </div>
         </form>
       </CardContent>
     </Card>
