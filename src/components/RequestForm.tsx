@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { validateStudent } from "@/data/students";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,6 +71,42 @@ const RequestForm = () => {
     setIsSubmitting(true);
 
     try {
+      // Valider que l'étudiant est bien dans la liste autorisée
+      const isValidStudent = validateStudent(
+        formData.firstName,
+        formData.lastName,
+        formData.studentGroup
+      );
+
+      if (!isValidStudent) {
+        // Chercher des étudiants similaires pour suggérer des corrections
+        const similarStudents = findSimilarStudents(
+          formData.firstName,
+          formData.lastName,
+          formData.studentGroup
+        );
+
+        let errorMessage =
+          "Vos informations ne correspondent pas à la liste des étudiants autorisés.";
+
+        if (similarStudents.length > 0) {
+          errorMessage +=
+            "\n\nVouliez-vous dire :\n" +
+            similarStudents
+              .map((s) => `- ${s.fullName} (${s.group})`)
+              .join("\n");
+        }
+
+        toast({
+          title: "Validation échouée",
+          description: errorMessage,
+          variant: "destructive",
+          duration: 7000, // Augmenter la durée pour laisser le temps de lire les suggestions
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
       // Vérifier si un étudiant existe déjà avec le même CIN
       const { data: existingCIN } = await supabase
         .from("attestation_requests")
@@ -109,7 +146,7 @@ const RequestForm = () => {
         last_name: formData.lastName,
         cin: formData.cin,
         phone: formData.phone,
-        student_group: formData.studentGroup as any,
+        student_group: formData.studentGroup,
       });
 
       if (error) throw error;
