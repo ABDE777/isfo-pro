@@ -61,19 +61,19 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
+// Définition des groupes par filière pour un meilleur ordre d'affichage
 const STUDENT_GROUPS = [
-  "D101",
-  "ID102",
-  "ID103",
-  "ID104",
-  "IDOSR201",
-  "IDOSR202",
-  "IDOSR203",
-  "IDOSR204",
+  // DEVOWFS en premier
   "DEVOWFS201",
   "DEVOWFS202",
   "DEVOWFS203",
   "DEVOWFS204",
+  // IDOSR en deuxième
+  "IDOSR201",
+  "IDOSR202",
+  "IDOSR203",
+  "IDOSR204",
+  // DEV en troisième
   "DEV101",
   "DEV102",
   "DEV103",
@@ -81,6 +81,11 @@ const STUDENT_GROUPS = [
   "DEV105",
   "DEV106",
   "DEV107",
+  // ID en dernier
+  "D101",
+  "ID102",
+  "ID103",
+  "ID104",
 ];
 
 const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
@@ -130,7 +135,7 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
       const { data, error } = await supabase
         .from("attestation_requests")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (error) throw error;
       setRequests(data || []);
@@ -196,6 +201,17 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
   };
 
   const exportToPDF = () => {
+    // Grouper les demandes par groupe
+    const groupedRequests = STUDENT_GROUPS.reduce((acc, group) => {
+      const requests = filteredRequests.filter(
+        (req) => req.student_group === group
+      );
+      if (requests.length > 0) {
+        acc[group] = requests;
+      }
+      return acc;
+    }, {} as Record<string, AttestationRequest[]>);
+
     // Importer jsPDF
     import("jspdf").then(async ({ default: JsPDF }) => {
       const { default: autoTable } = await import("jspdf-autotable");
@@ -207,76 +223,83 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
         format: "a4",
       });
 
-      // Ajouter le titre
+      // Ajouter le titre principal
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
-      doc.text(
-        `Demandes d'attestation - ${
-          selectedGroup === "all"
-            ? "Tous les groupes"
-            : `Groupe ${selectedGroup}`
-        }`,
-        15,
-        15
-      );
+      doc.text("Liste des demandes d'attestation par groupe", 15, 15);
 
       // Ajouter la date d'export
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.text(`Exporté le ${new Date().toLocaleDateString("fr-FR")}`, 15, 22);
 
-      // Préparer les données pour le tableau
-      const tableData = filteredRequests.map((req) => [
-        req.first_name,
-        req.last_name,
-        req.cin,
-        req.phone,
-        req.student_group,
-        getStatusLabel(req.status),
-        new Date(req.created_at).toLocaleDateString("fr-FR"),
-      ]);
-
-      // Définir les colonnes du tableau
       const columns = [
         "Prénom",
         "Nom",
         "CIN",
         "Téléphone",
-        "Groupe",
         "Statut",
         "Date de création",
       ];
 
-      // Ajouter le tableau au PDF
-      autoTable(doc, {
-        startY: 30,
-        head: [columns],
-        body: tableData,
-        theme: "grid",
-        styles: {
-          fontSize: 8,
-          cellPadding: 2,
-        },
-        headStyles: {
-          fillColor: [51, 65, 85],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-        },
-        alternateRowStyles: {
-          fillColor: [245, 247, 250],
-        },
+      let startY = 30;
+
+      // Pour chaque groupe, créer une section dans le PDF
+      Object.entries(groupedRequests).forEach(([group, requests], index) => {
+        // Ajouter un en-tête de groupe
+        if (index > 0) {
+          startY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text(
+          `Groupe ${group} (${requests.length} étudiant${
+            requests.length > 1 ? "s" : ""
+          })`,
+          15,
+          startY
+        );
+
+        const tableData = requests.map((req) => [
+          req.first_name,
+          req.last_name,
+          req.cin,
+          req.phone,
+          getStatusLabel(req.status),
+          new Date(req.created_at).toLocaleDateString("fr-FR"),
+        ]);
+
+        autoTable(doc, {
+          startY: startY + 5,
+          head: [columns],
+          body: tableData,
+          theme: "grid",
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+          },
+          headStyles: {
+            fillColor: [51, 65, 85],
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+          },
+          alternateRowStyles: {
+            fillColor: [245, 247, 250],
+          },
+        });
       });
 
       // Sauvegarder le PDF
       doc.save(
-        `attestation_requests_${
-          selectedGroup === "all" ? "tous_groupes" : selectedGroup
-        }_${new Date().toISOString().split("T")[0]}.pdf`
+        `attestation_requests_par_groupe_${
+          new Date().toISOString().split("T")[0]
+        }.pdf`
       );
 
       toast({
         title: "Export réussi",
-        description: `${filteredRequests.length} demandes exportées en PDF.`,
+        description: `${filteredRequests.length} demandes exportées en PDF, groupées par classe.`,
       });
     });
   };
@@ -321,7 +344,7 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
     filiere: getFiliere(group),
   })).filter((stat) => stat.count > 0);
 
-  const filiereStats = ["DEV", "ID", "DEVOWFS", "IDOSR"].map((filiere) => {
+  const filiereStats = ["DEVOWFS", "IDOSR", "DEV", "ID"].map((filiere) => {
     const filiereRequests = requests.filter(
       (r) => getFiliere(r.student_group) === filiere
     );
