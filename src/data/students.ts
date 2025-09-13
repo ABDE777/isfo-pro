@@ -7,6 +7,7 @@ interface Student {
 export const STUDENTS: Student[] = [
   // IDOSR201
   { cef: "2006010900304", fullName: "AOUN KARIM", group: "IDOSR201" },
+  { cef: "2006010900341", fullName: "BOBON SUOMM", group: "IDOSR201" },
   { cef: "2004101400387", fullName: "ATTAF YAZID", group: "IDOSR201" },
   { cef: "2004061100397", fullName: "ATYK HAMZA", group: "IDOSR201" },
   { cef: "2006060900106", fullName: "BOULFATAH MERYEM", group: "IDOSR201" },
