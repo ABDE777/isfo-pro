@@ -28,7 +28,7 @@ const RequestTracking = () => {
       const { data, error } = await supabase
         .from("attestation_requests")
         .select("*")
-        .eq("cin", cin)
+        .ilike("cin", cin)
         .single();
 
       if (error) throw error;
