@@ -112,7 +112,6 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
                   <SelectItem value="KENZA">KENZA</SelectItem>
                   <SelectItem value="GHIZLANE">GHIZLANE</SelectItem>
                   <SelectItem value="ABDELMONIM">ABDELMONIM</SelectItem>
-                  <SelectItem value="DIRECTEUR">DIRECTEUR</SelectItem>
                 </SelectContent>
               </Select>
             </div>
