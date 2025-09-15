@@ -79,7 +79,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      admin_profile: "KENZA" | "GHIZLANE" | "ABDELMONIM"
+      admin_profile: "KENZA" | "GHIZLANE" | "ABDELMONIM" | "DIRECTEUR"
       student_group:
         | "D101"
         | "ID102"
@@ -227,7 +227,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      admin_profile: ["KENZA", "GHIZLANE", "ABDELMONIM"],
+      admin_profile: ["KENZA", "GHIZLANE", "ABDELMONIM","DIRECTEUR"],
       student_group: [
         "D101",
         "ID102",
