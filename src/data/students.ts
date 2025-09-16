@@ -304,7 +304,7 @@ export const STUDENTS: Student[] = [
   { cef: "2003042300408", fullName: "EL HAIBA MOHAMED", group: "ID101" },
   { cef: "2006091100310", fullName: "EL HAYAT HAJAR", group: "ID101" },
   { cef: "2006021800246", fullName: "EL ASSRI YASSIR", group: "ID101" },
-  { cef: "2006071500288", fullName: "EL BOULQE ABDERRAHIM", group: "ID101" },
+  { cef: "2006071500288", fullName: "ELBOULQE ABDERRAHIM", group: "ID101" },
   { cef: "2005070300388", fullName: "IDBOUICHOU AMINE", group: "ID101" },
   { cef: "2006103000315", fullName: "IDHAMOU ANAS", group: "ID101" },
   { cef: "2007071700144", fullName: "KENBOUCHI ADAM", group: "ID101" },
