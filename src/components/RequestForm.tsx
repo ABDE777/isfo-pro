@@ -381,8 +381,7 @@ const RequestForm = () => {
           "• Numéro de téléphone enregistré: " +
           formattedPhone +
           "\n" +
-          "• Un SMS de confirmation vous sera envoyé\n" +
-          "• Vous pouvez suivre l'état de votre demande avec votre CIN",
+          "• Vous pouvez suivre l'état de votre demande avec votre CIN Depuis le deuxieme formulaire",
         duration: 10000,
       });
 
