@@ -5,6 +5,7 @@ import { Resend } from "npm:resend@2.0.0";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const supabase = createClient(
@@ -38,6 +39,7 @@ const handler = async (req: Request): Promise<Response> => {
       .single();
 
     if (studentError || !student) {
+      console.log("Student not found for email:", email);
       return new Response(
         JSON.stringify({ error: "Email d'étudiant non trouvé dans la base de données" }),
         { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
@@ -62,30 +64,48 @@ const handler = async (req: Request): Promise<Response> => {
       throw new Error('Erreur lors de la génération du code');
     }
 
-    // Send email
-    const emailResponse = await resend.emails.send({
-      from: "OFPPT ISFO <onboarding@resend.dev>",
-      to: [email],
-      subject: "Code de vérification - Demande d'attestation",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #2563eb;">Code de vérification</h1>
-          <p>Bonjour ${student.first_name} ${student.last_name},</p>
-          <p>Votre code de vérification pour la demande d'attestation est :</p>
-          <div style="background: #f3f4f6; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 2px; margin: 20px 0;">
-            ${code}
+    // Send email via Resend
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #2563eb; margin: 0;">Code de vérification</h1>
+        </div>
+        
+        <div style="background: #f8fafc; padding: 25px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 0 0 15px 0; font-size: 16px;">Bonjour <strong>${student.first_name} ${student.last_name}</strong>,</p>
+          <p style="margin: 0 0 20px 0; color: #64748b;">Votre code de vérification pour la demande d'attestation est :</p>
+          
+          <div style="background: #ffffff; padding: 20px; text-align: center; border-radius: 6px; border: 2px solid #e2e8f0; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 3px; color: #2563eb; font-family: monospace;">${code}</span>
           </div>
-          <p>Ce code expire dans 10 minutes.</p>
-          <p>Si vous n'avez pas fait cette demande, ignorez cet email.</p>
-          <hr>
-          <p style="font-size: 12px; color: #666;">
+          
+          <p style="margin: 20px 0 0 0; font-size: 14px; color: #dc2626;">⏰ Ce code expire dans 10 minutes.</p>
+        </div>
+        
+        <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+          <p style="margin: 0 0 10px 0; color: #64748b; font-size: 14px;">Si vous n'avez pas fait cette demande, ignorez cet email.</p>
+          <p style="margin: 0; font-size: 12px; color: #94a3b8;">
             Institut Spécialisé de Formation de l'Offshoring - Casablanca
           </p>
         </div>
-      `,
-    });
+      </div>
+    `;
 
-    console.log("Verification email sent:", emailResponse);
+    try {
+      const emailResponse = await resend.emails.send({
+        from: "OFPPT ISFO <onboarding@resend.dev>",
+        to: [email],
+        subject: "Code de vérification - Demande d'attestation",
+        html: emailHtml,
+      });
+
+      console.log("Email sent successfully via Resend:", emailResponse);
+    } catch (error: any) {
+      console.error("Error sending email via Resend:", error);
+      throw new Error(`Erreur lors de l'envoi de l'email: ${error.message}`);
+    }
+
+    console.log("Verification code sent successfully to:", email);
 
     return new Response(
       JSON.stringify({ 
@@ -104,7 +124,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-verification function:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message || "Erreur lors de l'envoi de l'email" }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },

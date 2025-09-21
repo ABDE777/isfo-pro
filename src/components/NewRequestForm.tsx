@@ -69,11 +69,16 @@ interface Student {
   requestCount: number;
 }
 
-interface AttestationRequest {
+export interface AttestationRequest {
   id: string;
   status: string;
   created_at: string;
   rejection_reason?: string;
+  first_name: string;
+  last_name: string;
+  cin: string;
+  phone?: string;
+  attestation_type?: string;
   student_group:
     | "ID101"
     | "ID102"

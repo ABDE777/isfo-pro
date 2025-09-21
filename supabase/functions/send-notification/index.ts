@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { Resend } from "npm:resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const supabase = createClient(
@@ -12,17 +13,7 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
-const client = new SMTPClient({
-  connection: {
-    hostname: "smtp.gmail.com",
-    port: 587,
-    tls: true,
-    auth: {
-      username: Deno.env.get("GMAIL_USER") ?? '',
-      password: Deno.env.get("GMAIL_APP_PASSWORD") ?? '',
-    },
-  },
-});
+const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 
 interface NotificationRequest {
   requestId: string;
@@ -38,106 +29,125 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const { requestId, status, rejectionReason }: NotificationRequest = await req.json();
 
-    // Get request details with student info
+    console.log("Processing notification:", { requestId, status });
+
+    // Get attestation request details - student info is already included in the request
     const { data: request, error: requestError } = await supabase
       .from('attestation_requests')
-      .select(`
-        *,
-        students:student_id (
-          first_name,
-          last_name,
-          email,
-          student_group
-        )
-      `)
+      .select('*')
       .eq('id', requestId)
       .single();
 
     if (requestError || !request) {
-      throw new Error('Demande non trouvée');
+      console.error("Request not found:", requestError);
+      throw new Error("Demande d'attestation non trouvée");
     }
 
-    const student = request.students;
-    if (!student) {
-      throw new Error('Informations étudiant non trouvées');
+    // For requests that have student_id, try to get email from students table
+    let studentEmail = request.phone; // fallback to phone field which sometimes contains email
+    
+    if (request.student_id) {
+      const { data: studentData } = await supabase
+        .from('students')
+        .select('email')
+        .eq('id', request.student_id)
+        .single();
+      
+      if (studentData?.email) {
+        studentEmail = studentData.email;
+      }
     }
 
-    let subject = "";
-    let html = "";
+    // Use student data directly from the attestation request
+    const student = {
+      first_name: request.first_name,
+      last_name: request.last_name,
+      email: studentEmail,
+      student_group: request.student_group,
+      cin: request.cin
+    };
+
+    // Prepare email content based on status
+    let subject: string;
+    let emailHtml: string;
 
     if (status === 'approved') {
-      subject = "✅ Attestation approuvée - Prête pour retrait";
-      html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: #059669; color: white; padding: 20px; text-align: center;">
-            <h1>✅ Attestation Approuvée</h1>
+      subject = "Attestation approuvée - OFPPT ISFO";
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #059669; margin: 0;">✅ Attestation Approuvée</h1>
           </div>
-          <div style="padding: 20px;">
-            <p>Bonjour <strong>${student.first_name} ${student.last_name}</strong>,</p>
-            <p>Bonne nouvelle ! Votre demande d'attestation de poursuite de formation a été <strong>approuvée</strong>.</p>
+          
+          <div style="background: #f0fdf4; padding: 25px; border-radius: 8px; border-left: 4px solid #059669; margin: 20px 0;">
+            <p style="margin: 0 0 15px 0; font-size: 16px;">Bonjour <strong>${student.first_name} ${student.last_name}</strong>,</p>
+            <p style="margin: 0 0 15px 0; color: #166534;">Excellente nouvelle ! Votre demande d'attestation a été <strong>approuvée</strong>.</p>
             
-            <div style="background: #f0fdf4; border: 1px solid #059669; border-radius: 8px; padding: 15px; margin: 20px 0;">
-              <h3 style="color: #059669; margin-top: 0;">📄 Votre attestation est prête</h3>
-              <p><strong>Groupe :</strong> ${student.student_group}</p>
-              <p><strong>Date d'approbation :</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
+            <div style="background: #ffffff; padding: 15px; border-radius: 6px; margin: 15px 0;">
+              <p style="margin: 0 0 10px 0; font-weight: bold; color: #059669;">Détails de votre demande :</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>CIN :</strong> ${student.cin}</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>Groupe :</strong> ${student.student_group}</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>Date de demande :</strong> ${new Date(request.created_at).toLocaleDateString('fr-FR')}</p>
             </div>
-
-            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0;">
-              <h3 style="color: #f59e0b; margin-top: 0;">📍 Retrait du document</h3>
-              <p>Votre attestation est maintenant disponible au <strong>secrétariat de la direction</strong> de l'Institut Spécialisé de Formation de l'Offshoring - Casablanca.</p>
-              <p>Veuillez vous présenter avec une pièce d'identité pour récupérer votre document.</p>
-            </div>
-
-            <p>Merci de votre confiance.</p>
+            
+            <p style="margin: 15px 0 0 0; color: #166534;"><strong>Veuillez vous présenter à la direction pour récupérer votre attestation.</strong></p>
           </div>
-          <div style="background: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #666;">
-            Institut Spécialisé de Formation de l'Offshoring - Casablanca<br>
-            Office de la Formation Professionnelle et de la Promotion du Travail
+          
+          <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+            <p style="margin: 0; font-size: 12px; color: #94a3b8; text-align: center;">
+              Institut Spécialisé de Formation de l'Offshoring - Casablanca
+            </p>
           </div>
         </div>
       `;
     } else if (status === 'rejected') {
-      subject = "❌ Demande d'attestation refusée";
-      html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: #dc2626; color: white; padding: 20px; text-align: center;">
-            <h1>❌ Demande Refusée</h1>
+      subject = "Demande d'attestation rejetée - OFPPT ISFO";
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #dc2626; margin: 0;">❌ Demande Rejetée</h1>
           </div>
-          <div style="padding: 20px;">
-            <p>Bonjour <strong>${student.first_name} ${student.last_name}</strong>,</p>
-            <p>Nous regrettons de vous informer que votre demande d'attestation de poursuite de formation a été <strong>refusée</strong>.</p>
+          
+          <div style="background: #fef2f2; padding: 25px; border-radius: 8px; border-left: 4px solid #dc2626; margin: 20px 0;">
+            <p style="margin: 0 0 15px 0; font-size: 16px;">Bonjour <strong>${student.first_name} ${student.last_name}</strong>,</p>
+            <p style="margin: 0 0 15px 0; color: #991b1b;">Nous regrettons de vous informer que votre demande d'attestation a été <strong>rejetée</strong>.</p>
             
-            <div style="background: #fef2f2; border: 1px solid #dc2626; border-radius: 8px; padding: 15px; margin: 20px 0;">
-              <h3 style="color: #dc2626; margin-top: 0;">📋 Détails du refus</h3>
-              <p><strong>Groupe :</strong> ${student.student_group}</p>
-              <p><strong>Date :</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
-              ${rejectionReason ? `<p><strong>Motif :</strong> ${rejectionReason}</p>` : ''}
+            <div style="background: #ffffff; padding: 15px; border-radius: 6px; margin: 15px 0;">
+              <p style="margin: 0 0 10px 0; font-weight: bold; color: #dc2626;">Détails de votre demande :</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>CIN :</strong> ${student.cin}</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>Groupe :</strong> ${student.student_group}</p>
+              <p style="margin: 5px 0; color: #374151;"><strong>Date de demande :</strong> ${new Date(request.created_at).toLocaleDateString('fr-FR')}</p>
+              ${rejectionReason ? `<p style="margin: 10px 0 0 0; color: #991b1b;"><strong>Motif :</strong> ${rejectionReason}</p>` : ''}
             </div>
-
-            <div style="background: #f0f9ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 15px; margin: 20px 0;">
-              <h3 style="color: #3b82f6; margin-top: 0;">💡 Que faire maintenant ?</h3>
-              <p>Si vous pensez qu'il y a une erreur ou si vous souhaitez des clarifications, veuillez contacter le secrétariat de la direction.</p>
-              <p>Vous pouvez soumettre une nouvelle demande après avoir résolu les problèmes mentionnés.</p>
-            </div>
+            
+            <p style="margin: 15px 0 0 0; color: #991b1b;"><strong>Votre demande a été rejetée. Veuillez vous présenter à la direction pour plus d'informations.</strong></p>
           </div>
-          <div style="background: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #666;">
-            Institut Spécialisé de Formation de l'Offshoring - Casablanca<br>
-            Office de la Formation Professionnelle et de la Promotion du Travail
+          
+          <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+            <p style="margin: 0; font-size: 12px; color: #94a3b8; text-align: center;">
+              Institut Spécialisé de Formation de l'Offshoring - Casablanca
+            </p>
           </div>
         </div>
       `;
+    } else {
+      throw new Error("Statut de notification invalide");
     }
 
-    // Send email notification
-    await client.send({
-      from: Deno.env.get("GMAIL_USER") ?? '',
-      to: student.email,
-      subject,
-      content: html,
-      html: html,
-    });
+    // Send email via Resend
+    try {
+      const emailResponse = await resend.emails.send({
+        from: "OFPPT ISFO <onboarding@resend.dev>",
+        to: [student.email],
+        subject: subject,
+        html: emailHtml,
+      });
 
-    console.log("Notification email sent successfully");
+      console.log("Notification email sent successfully via Resend:", emailResponse);
+    } catch (error: any) {
+      console.error("Error sending notification email via Resend:", error);
+      throw new Error(`Erreur lors de l'envoi de la notification: ${error.message}`);
+    }
 
     return new Response(
       JSON.stringify({ message: "Notification envoyée avec succès" }),
@@ -149,7 +159,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-notification function:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message || "Erreur lors de l'envoi de la notification" }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
