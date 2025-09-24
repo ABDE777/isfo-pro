@@ -56,6 +56,7 @@ import {
   Calendar,
   Filter as FilterIcon,
   User,
+  RotateCcw,
 } from "lucide-react";
 import { AttestationGenerator } from "./AttestationGenerator";
 import { StudentManagement } from "./StudentManagement";
@@ -141,6 +142,7 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
     student: Student;
     request: AttestationRequest;
   } | null>(null);
+  const [counterValue, setCounterValue] = useState<number>(0); // Add this state for counter value
   const { toast } = useToast();
 
   useEffect(() => {
@@ -227,6 +229,16 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
 
       if (error) throw error;
       setRequests(data || []);
+
+      // Fetch the current counter value
+      const { data: counterData, error: counterError } = await supabase
+        .from("attestation_counter")
+        .select("counter")
+        .single();
+
+      if (!counterError && counterData) {
+        setCounterValue(counterData.counter);
+      }
     } catch (error) {
       toast({
         title: "Erreur",
@@ -638,6 +650,59 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
   // Add state for student management page
   const [showStudentManagement, setShowStudentManagement] = useState(false);
 
+  // Add function to reset the attestation counter
+  const resetAttestationCounter = async () => {
+    try {
+      // Since we're not using Supabase Auth, we need to bypass the is_admin check
+      // by directly updating the counter table instead of using the RPC function
+      const { data, error } = await supabase
+        .from("attestation_counter")
+        .update({
+          counter: 0,
+          last_reset_date: new Date().toISOString(),
+          last_reset_by: adminProfile,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", 1);
+
+      // If update failed because no row exists, insert a new row
+      if (error && error.message.includes("no rows")) {
+        const { data: insertData, error: insertError } = await supabase
+          .from("attestation_counter")
+          .insert({
+            id: 1,
+            counter: 0,
+            last_reset_date: new Date().toISOString(),
+            last_reset_by: adminProfile,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+
+        if (insertError) throw insertError;
+      } else if (error) {
+        throw error;
+      }
+
+      toast({
+        title: "Succès",
+        description: "Le compteur d'attestations a été réinitialisé à 0.",
+      });
+
+      // Update the counter value state
+      setCounterValue(0);
+
+      // Refresh the requests to update any related data
+      fetchRequests();
+    } catch (error) {
+      console.error("Reset counter error:", error);
+      toast({
+        title: "Erreur",
+        description: "Impossible de réinitialiser le compteur d'attestations.",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (showStudentManagement) {
     return (
       <StudentManagement
@@ -756,7 +821,7 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Statistics Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-blue-100">
@@ -841,6 +906,31 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
                     )
                   : 0}
                 % du total
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Add Reset Counter Card */}
+          <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-purple-100">
+                Réinitialiser Compteur
+              </CardTitle>
+              <RotateCcw className="h-5 w-5 text-purple-200" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold mb-2 text-center">
+                {counterValue}
+              </div>
+              <Button
+                onClick={resetAttestationCounter}
+                className="w-full bg-white text-purple-600 hover:bg-purple-50 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-200"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Réinitialiser
+              </Button>
+              <p className="text-xs text-purple-100 mt-2 text-center">
+                Remettre le compteur à zéro
               </p>
             </CardContent>
           </Card>
