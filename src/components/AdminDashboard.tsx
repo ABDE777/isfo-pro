@@ -19,6 +19,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -262,12 +270,29 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
     ).length;
   };
 
+  const [emailModal, setEmailModal] = useState<{
+    isOpen: boolean;
+    email: string;
+    subject: string;
+    message: string;
+    requestId: string;
+    status: string;
+  }>({
+    isOpen: false,
+    email: "",
+    subject: "",
+    message: "",
+    requestId: "",
+    status: "",
+  });
+
   const updateStatus = async (
     id: string,
     newStatus: string,
     rejectionReason?: string
   ) => {
     try {
+      // D'abord mettre à jour le statut
       const { error } = await supabase
         .from("attestation_requests")
         .update({
@@ -278,47 +303,61 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
 
       if (error) throw error;
 
-      // Envoyer un email de notification
-      try {
-        const { error: emailError } = await supabase.functions.invoke(
-          "send-notification",
-          {
-            body: {
-              requestId: id,
-              status: newStatus,
-              rejectionReason,
-            },
-          }
-        );
+      // Trouver l'email de l'étudiant
+      const request = requests.find(r => r.id === id);
+      const studentEmail = request?.students?.email || request?.phone || "";
 
-        if (emailError) {
-          console.error("Error sending email:", emailError);
-          toast({
-            title: "Statut mis à jour",
-            description:
-              "Le statut a été mis à jour mais l'email de notification n'a pas pu être envoyé.",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title:
-              newStatus === "approved"
-                ? "Demande approuvée"
-                : "Demande rejetée",
-            description: "L'étudiant a été notifié par email.",
-          });
-        }
-      } catch (emailError) {
-        console.error("Error sending notification email:", emailError);
-        toast({
-          title: "Statut mis à jour",
-          description:
-            "Le statut a été mis à jour mais l'email de notification n'a pas pu être envoyé.",
-          variant: "destructive",
-        });
+      // Préparer le message selon le statut
+      let subject = "";
+      let message = "";
+
+      if (newStatus === "approved") {
+        subject = "Attestation approuvée - OFPPT ISFO";
+        message = `Bonjour ${request?.first_name} ${request?.last_name},
+
+Excellente nouvelle ! Votre demande d'attestation a été approuvée.
+
+Détails de votre demande :
+- CIN : ${request?.cin}
+- Groupe : ${request?.student_group}
+- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString('fr-FR')}
+
+Veuillez vous présenter à la direction pour récupérer votre attestation.
+
+Institut Spécialisé de Formation de l'Offshoring - Casablanca`;
+      } else if (newStatus === "rejected") {
+        subject = "Demande d'attestation rejetée - OFPPT ISFO";
+        message = `Bonjour ${request?.first_name} ${request?.last_name},
+
+Nous regrettons de vous informer que votre demande d'attestation a été rejetée.
+
+Détails de votre demande :
+- CIN : ${request?.cin}
+- Groupe : ${request?.student_group}
+- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString('fr-FR')}
+${rejectionReason ? `- Motif : ${rejectionReason}` : ''}
+
+Veuillez vous présenter à la direction pour plus d'informations.
+
+Institut Spécialisé de Formation de l'Offshoring - Casablanca`;
       }
 
+      // Ouvrir la modale avec l'email pré-rempli
+      setEmailModal({
+        isOpen: true,
+        email: studentEmail,
+        subject,
+        message,
+        requestId: id,
+        status: newStatus,
+      });
+
       await fetchRequests();
+      
+      toast({
+        title: "Statut mis à jour",
+        description: "Vous pouvez maintenant envoyer l'email manuellement.",
+      });
     } catch (error) {
       toast({
         title: "Erreur",
@@ -326,6 +365,27 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
         variant: "destructive",
       });
     }
+  };
+
+  const copyEmailToClipboard = () => {
+    const emailContent = `À: ${emailModal.email}
+Objet: ${emailModal.subject}
+
+${emailModal.message}`;
+    
+    navigator.clipboard.writeText(emailContent);
+    toast({
+      title: "Email copié",
+      description: "Le contenu de l'email a été copié dans le presse-papiers.",
+    });
+  };
+
+  const openEmailClient = () => {
+    const subject = encodeURIComponent(emailModal.subject);
+    const body = encodeURIComponent(emailModal.message);
+    const to = encodeURIComponent(emailModal.email);
+    
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`);
   };
 
   const deleteRequest = async (id: string) => {
@@ -1353,6 +1413,63 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modale d'envoi d'email */}
+      <Dialog open={emailModal.isOpen} onOpenChange={(open) => setEmailModal(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Envoyer un email à l'étudiant</DialogTitle>
+            <DialogDescription>
+              Copiez le contenu ci-dessous ou utilisez votre client email.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="email-to">À :</Label>
+              <Input id="email-to" value={emailModal.email} disabled />
+            </div>
+            
+            <div>
+              <Label htmlFor="email-subject">Objet :</Label>
+              <Input 
+                id="email-subject" 
+                value={emailModal.subject} 
+                onChange={(e) => setEmailModal(prev => ({ ...prev, subject: e.target.value }))}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="email-message">Message :</Label>
+              <Textarea 
+                id="email-message" 
+                rows={12}
+                value={emailModal.message}
+                onChange={(e) => setEmailModal(prev => ({ ...prev, message: e.target.value }))}
+                className="resize-none"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter className="gap-2">
+            <Button 
+              variant="outline" 
+              onClick={copyEmailToClipboard}
+              className="flex items-center gap-2"
+            >
+              <FileText className="h-4 w-4" />
+              Copier le contenu
+            </Button>
+            <Button 
+              onClick={openEmailClient}
+              className="flex items-center gap-2"
+            >
+              <Mail className="h-4 w-4" />
+              Ouvrir le client email
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -811,10 +811,41 @@ export const StudentManagement = ({
 
   const handleAddStudent = async () => {
     try {
-      // Use the password_hash field directly
+      // Basic validation
+      if (!newStudent.first_name.trim()) {
+        toast({
+          title: "Erreur de validation",
+          description: "Le prénom est requis.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (!newStudent.last_name.trim()) {
+        toast({
+          title: "Erreur de validation",
+          description: "Le nom est requis.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (!newStudent.email.trim() || !newStudent.email.includes("@")) {
+        toast({
+          title: "Erreur de validation",
+          description: "Un email valide est requis.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Use the password_hash field directly, with default if empty
       const studentToAdd = {
         ...newStudent,
-        password_hash: newStudent.password_hash || null,
+        password_hash: newStudent.password_hash?.trim() || "default123",
+        formation_year: newStudent.formation_year || defaultFormationYear,
+        formation_type: newStudent.formation_type || "Résidentielle",
+        formation_mode: newStudent.formation_mode || "Diplômante",
       };
 
       const { data, error } = await supabase
@@ -822,7 +853,10 @@ export const StudentManagement = ({
         .insert([studentToAdd])
         .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Database error creating user:", error);
+        throw new Error(`Database error creating new user: ${error.message}`);
+      }
 
       toast({
         title: "Succès",
@@ -842,14 +876,15 @@ export const StudentManagement = ({
         inscription_number: "",
         formation_type: "",
         formation_mode: "",
-        formation_year: "",
+        formation_year: defaultFormationYear,
         password_hash: "",
       });
       fetchStudents();
     } catch (error) {
+      console.error("Failed to create user:", error);
       toast({
         title: "Erreur",
-        description: "Impossible d'ajouter l'étudiant.",
+        description: `Failed to create user: ${(error as Error).message}`,
         variant: "destructive",
       });
     }

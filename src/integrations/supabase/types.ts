@@ -14,86 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
-      admin_alerts: {
-        Row: {
-          admin_emails: string[]
-          alert_type: string
-          created_at: string | null
-          id: string
-          request_id: string | null
-          sent_at: string | null
-        }
-        Insert: {
-          admin_emails: string[]
-          alert_type?: string
-          created_at?: string | null
-          id?: string
-          request_id?: string | null
-          sent_at?: string | null
-        }
-        Update: {
-          admin_emails?: string[]
-          alert_type?: string
-          created_at?: string | null
-          id?: string
-          request_id?: string | null
-          sent_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "admin_alerts_request_id_fkey"
-            columns: ["request_id"]
-            isOneToOne: false
-            referencedRelation: "attestation_requests"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      admin_profiles: {
+      admins: {
         Row: {
           created_at: string
-          id: string
+          id: number
+          password: string
           profile_name: string
-          role: string
-          updated_at: string
-          user_id: string
         }
         Insert: {
           created_at?: string
-          id?: string
+          id?: number
+          password: string
           profile_name: string
-          role?: string
-          updated_at?: string
-          user_id: string
         }
         Update: {
           created_at?: string
-          id?: string
+          id?: number
+          password?: string
           profile_name?: string
-          role?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      admin_users: {
-        Row: {
-          created_at: string
-          id: string
-          password_hash: string
-          profile: Database["public"]["Enums"]["admin_profile"]
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          password_hash: string
-          profile: Database["public"]["Enums"]["admin_profile"]
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          password_hash?: string
-          profile?: Database["public"]["Enums"]["admin_profile"]
         }
         Relationships: []
       }
@@ -241,33 +179,6 @@ export type Database = {
         }
         Relationships: []
       }
-      verification_codes: {
-        Row: {
-          code: string
-          created_at: string
-          email: string
-          expires_at: string
-          id: string
-          used: boolean
-        }
-        Insert: {
-          code: string
-          created_at?: string
-          email: string
-          expires_at: string
-          id?: string
-          used?: boolean
-        }
-        Update: {
-          code?: string
-          created_at?: string
-          email?: string
-          expires_at?: string
-          id?: string
-          used?: boolean
-        }
-        Relationships: []
-      }
     }
     Views: {
       [_ in never]: never
@@ -282,7 +193,7 @@ export type Database = {
         Returns: number
       }
       is_admin: {
-        Args: { user_id?: string }
+        Args: Record<PropertyKey, never>
         Returns: boolean
       }
       reset_attestation_counter: {

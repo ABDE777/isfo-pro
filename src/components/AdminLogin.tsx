@@ -54,10 +54,9 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
 
     try {
       const { data, error } = await supabase
-        .from("admin_users")
+        .from("admins")
         .select("*")
-        .eq("profile", profile as any)
-        .eq("password_hash", password)
+        .eq("profile_name", profile)
         .single();
 
       if (error || !data) {
@@ -69,12 +68,21 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
         return;
       }
 
-      toast({
-        title: "Connexion réussie",
-        description: `Bienvenue ${profile} !`,
-      });
-
-      onLogin(profile);
+      // Vérification du mot de passe
+      if (password === data.password) {
+        localStorage.setItem("loggedInAdmin", data.profile_name);
+        onLogin(data.profile_name);
+        toast({
+          title: "Connexion réussie",
+          description: `Bienvenue ${data.profile_name}`,
+        });
+      } else {
+        toast({
+          title: "Erreur de connexion",
+          description: "Profil ou mot de passe incorrect.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Erreur",
@@ -109,9 +117,10 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
                   <SelectValue placeholder="Sélectionnez votre profil" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="KENZA">KENZA</SelectItem>
-                  <SelectItem value="GHIZLANE">GHIZLANE</SelectItem>
-                  <SelectItem value="ABDELMONIM">ABDELMONIM</SelectItem>
+                  <SelectItem value="DR IBRAHIM">DR IBRAHIM</SelectItem>
+                  <SelectItem value="GS KENZA">GS KENZA</SelectItem>
+                  <SelectItem value="GS GHIZLANE">GS GHIZLANE</SelectItem>
+                  <SelectItem value="ABDELMONIM TEST">ABDELMONIM TEST</SelectItem>
                 </SelectContent>
               </Select>
             </div>
