@@ -1,4 +1,4 @@
-# VistaVerse Explore - ISFO Student Management System
+# ISFO-PRO - ISFO Student Management System
 
 A comprehensive student management and attestation system for the Institut Spécialisé de Formation de l'Offshoring (ISFO) Casablanca, built with modern web technologies.
 
@@ -21,7 +21,7 @@ A comprehensive student management and attestation system for the Institut Spéc
 
 ## 🎯 Overview
 
-VistaVerse Explore is a full-stack web application designed to streamline student management and attestation processes at ISFO Casablanca. The system provides separate interfaces for students and administrators with robust features for managing student data, generating attestations, and tracking requests.
+ISFO-PRO Explore is a full-stack web application designed to streamline student management and attestation processes at ISFO Casablanca. The system provides separate interfaces for students and administrators with robust features for managing student data, generating attestations, and tracking requests.
 
 ## ✨ Features
 
@@ -76,7 +76,7 @@ VistaVerse Explore is a full-stack web application designed to streamline studen
 ## 📁 Project Structure
 
 ```
-vista-verse-explore/
+isfo-pro/
 ├── public/                 # Static assets
 ├── src/
 │   ├── assets/            # Images and static files
@@ -107,7 +107,7 @@ vista-verse-explore/
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd vista-verse-explore
+cd isfo-pro
 ```
 
 2. Install dependencies:
