@@ -1,0 +1,25 @@
+export const STUDENT_GROUPS = [
+  // DEVOWFS
+  "DEVOWFS201",
+  "DEVOWFS202",
+  "DEVOWFS203",
+  "DEVOWFS204",
+  // IDOSR
+  "IDOSR201",
+  "IDOSR202",
+  "IDOSR203",
+  "IDOSR204",
+  // DEV
+  "DEV101",
+  "DEV102",
+  "DEV103",
+  "DEV104",
+  "DEV105",
+  "DEV106",
+  "DEV107",
+  // ID
+  "ID101",
+  "ID102",
+  "ID103",
+  "ID104",
+];
