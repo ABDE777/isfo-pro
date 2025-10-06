@@ -23,6 +23,7 @@ interface AttestationData {
   request: {
     id: string;
     created_at: string;
+    attestation_number?: number;
   };
 }
 
@@ -38,29 +39,10 @@ export const AttestationGenerator: React.FC<AttestationGeneratorProps> = ({
   const { student, request } = attestationData;
   const currentDate = new Date().toLocaleDateString("fr-FR");
   const currentYear = new Date().getFullYear();
-  const [referenceNumber, setReferenceNumber] = useState<string>("01");
-
-  useEffect(() => {
-    const fetchGlobalCounter = async () => {
-      try {
-        // Incrémenter le compteur global à chaque génération
-        const { data, error } = await supabase.rpc(
-          "increment_attestation_counter"
-        );
-        if (error) throw error;
-
-        // Formater le numéro avec des zéros (ex: 001, 002, etc.)
-        setReferenceNumber(String(data).padStart(3, "0"));
-      } catch (error) {
-        console.error("Error incrementing counter:", error);
-        // Fallback: utiliser un numéro basé sur l'ID de la demande
-        const fallbackNumber = parseInt(request.id.slice(-3), 16) % 1000;
-        setReferenceNumber(String(fallbackNumber).padStart(3, "0"));
-      }
-    };
-
-    fetchGlobalCounter();
-  }, [request.id]);
+  // Use the attestation number from the request directly (already set by admin)
+  const referenceNumber = request.attestation_number 
+    ? String(request.attestation_number).padStart(3, "0")
+    : "001";
 
   const formatBirthDate = (dateString: string) => {
     const date = new Date(dateString);

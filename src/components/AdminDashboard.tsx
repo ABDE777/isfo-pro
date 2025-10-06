@@ -65,11 +65,14 @@ import {
   Filter as FilterIcon,
   User,
   RotateCcw,
+  Shield,
 } from "lucide-react";
 import { AttestationGenerator } from "./AttestationGenerator";
 import { StudentManagement } from "./StudentManagement";
 import { AttestationCounterDialog } from "./AttestationCounterDialog";
-import { importStudents } from "@/utils/studentImport";
+import { SecurityDashboard } from "./SecurityDashboard";
+import { CSVImportDialog } from "./CSVImportDialog";
+import { importExcelStudents } from "@/utils/importFromExcel";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import ofpptLogo from "@/assets/ofppt-logo.png";
@@ -85,6 +88,7 @@ interface AttestationRequest {
   status: string;
   created_at: string;
   student_id?: string;
+  attestation_number?: number;
   students?: {
     email: string;
   };
@@ -139,6 +143,7 @@ const STUDENT_GROUPS = [
 ];
 
 const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
+  const { toast } = useToast();
   const [requests, setRequests] = useState<AttestationRequest[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<
     AttestationRequest[]
@@ -156,13 +161,27 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
   const [counterValue, setCounterValue] = useState<number>(0);
   const [importLoading, setImportLoading] = useState(false);
   const [showCounterDialog, setShowCounterDialog] = useState(false);
-  const [showAttestationCounterInput, setShowAttestationCounterInput] = useState(false);
+  const [showAttestationCounterInput, setShowAttestationCounterInput] =
+    useState(false);
   const [pendingAttestationData, setPendingAttestationData] = useState<{
     student: Student;
     request: AttestationRequest;
   } | null>(null);
-  const [manualAttestationNumber, setManualAttestationNumber] = useState<string>("");
-  const { toast } = useToast();
+  const [manualAttestationNumber, setManualAttestationNumber] =
+    useState<string>("");
+  const [showCSVImport, setShowCSVImport] = useState(false);
+  const [activeView, setActiveView] = useState<string>(() => {
+    // Restore active view from localStorage or default to "requests"
+    const savedView = localStorage.getItem("adminActiveView");
+    return savedView && ["requests", "students", "security"].includes(savedView)
+      ? savedView
+      : "requests";
+  });
+
+  // Persist activeView to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem("adminActiveView", activeView);
+  }, [activeView]);
 
   useEffect(() => {
     fetchRequests();
@@ -315,7 +334,7 @@ const AdminDashboard = ({ adminProfile, onLogout }: AdminDashboardProps) => {
       if (error) throw error;
 
       // Trouver l'email de l'étudiant
-      const request = requests.find(r => r.id === id);
+      const request = requests.find((r) => r.id === id);
       const studentEmail = request?.students?.email || request?.phone || "";
 
       // Préparer le message selon le statut
@@ -331,7 +350,9 @@ Excellente nouvelle ! Votre demande d'attestation a été approuvée.
 Détails de votre demande :
 - CIN : ${request?.cin}
 - Groupe : ${request?.student_group}
-- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString('fr-FR')}
+- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString(
+          "fr-FR"
+        )}
 
 Veuillez vous présenter à la direction pour récupérer votre attestation.
 
@@ -345,8 +366,10 @@ Nous regrettons de vous informer que votre demande d'attestation a été rejeté
 Détails de votre demande :
 - CIN : ${request?.cin}
 - Groupe : ${request?.student_group}
-- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString('fr-FR')}
-${rejectionReason ? `- Motif : ${rejectionReason}` : ''}
+- Date de demande : ${new Date(request?.created_at || "").toLocaleDateString(
+          "fr-FR"
+        )}
+${rejectionReason ? `- Motif : ${rejectionReason}` : ""}
 
 Veuillez vous présenter à la direction pour plus d'informations.
 
@@ -364,7 +387,7 @@ Institut Spécialisé de Formation de l'Offshoring - Casablanca`;
       });
 
       await fetchRequests();
-      
+
       toast({
         title: "Statut mis à jour",
         description: "Vous pouvez maintenant envoyer l'email manuellement.",
@@ -383,7 +406,7 @@ Institut Spécialisé de Formation de l'Offshoring - Casablanca`;
 Objet: ${emailModal.subject}
 
 ${emailModal.message}`;
-    
+
     navigator.clipboard.writeText(emailContent);
     toast({
       title: "Email copié",
@@ -395,7 +418,7 @@ ${emailModal.message}`;
     const subject = encodeURIComponent(emailModal.subject);
     const body = encodeURIComponent(emailModal.message);
     const to = encodeURIComponent(emailModal.email);
-    
+
     window.open(`mailto:${to}?subject=${subject}&body=${body}`);
   };
 
@@ -533,31 +556,50 @@ ${emailModal.message}`;
     }
 
     try {
-      // Update the global counter with the manual value
-      const { error } = await supabase.rpc("admin_update_attestation_counter", {
-        new_counter_value: numValue,
-      });
-
-      if (error) throw error;
-
-      setCounterValue(numValue);
-      setShowAttestationCounterInput(false);
-      setManualAttestationNumber("");
-
-      // NOW show the attestation with the pending data
+      // Update the attestation request with the manual number
       if (pendingAttestationData) {
-        setShowAttestation(pendingAttestationData);
-        setPendingAttestationData(null);
-      }
+        const { error: updateError } = await supabase
+          .from("attestation_requests")
+          .update({ attestation_number: numValue })
+          .eq("id", pendingAttestationData.request.id);
 
-      toast({
-        title: "Succès",
-        description: `Numéro d'attestation défini: ${numValue}`,
-      });
+        if (updateError) throw updateError;
+
+        // Update the global counter with the manual value
+        const { error: counterError } = await supabase.rpc(
+          "admin_update_attestation_counter",
+          {
+            new_counter_value: numValue,
+          }
+        );
+
+        if (counterError) throw counterError;
+
+        setCounterValue(numValue);
+        setShowAttestationCounterInput(false);
+        setManualAttestationNumber("");
+
+        // NOW show the attestation with the pending data and updated number
+        setShowAttestation({
+          ...pendingAttestationData,
+          request: {
+            ...pendingAttestationData.request,
+            attestation_number: numValue,
+          },
+        });
+        setPendingAttestationData(null);
+
+        toast({
+          title: "Succès",
+          description: `Numéro d'attestation défini: ${numValue}`,
+        });
+      }
     } catch (error) {
       toast({
         title: "Erreur",
-        description: (error as Error).message || "Erreur lors de la mise à jour du compteur",
+        description:
+          (error as Error).message ||
+          "Erreur lors de la mise à jour du compteur",
         variant: "destructive",
       });
     }
@@ -580,22 +622,24 @@ ${emailModal.message}`;
     try {
       // Prepare data for Excel
       const excelData = filteredRequests.map((request) => ({
-        "Nom": request.last_name,
-        "Prénom": request.first_name,
-        "CIN": request.cin,
-        "Téléphone": request.phone,
-        "Groupe": request.student_group,
-        "Email": request.students?.email || "N/A",
-        "Statut": getStatusLabel(request.status),
-        "Date de demande": new Date(request.created_at).toLocaleDateString("fr-FR"),
-        "Année": new Date(request.created_at).getFullYear(),
+        Nom: request.last_name,
+        Prénom: request.first_name,
+        CIN: request.cin,
+        Téléphone: request.phone,
+        Groupe: request.student_group,
+        Email: request.students?.email || "N/A",
+        Statut: getStatusLabel(request.status),
+        "Date de demande": new Date(request.created_at).toLocaleDateString(
+          "fr-FR"
+        ),
+        Année: new Date(request.created_at).getFullYear(),
       }));
 
       // Create worksheet
       const ws = XLSX.utils.json_to_sheet(excelData);
-      
+
       // Set column widths
-      ws['!cols'] = [
+      ws["!cols"] = [
         { wch: 15 }, // Nom
         { wch: 15 }, // Prénom
         { wch: 12 }, // CIN
@@ -604,7 +648,7 @@ ${emailModal.message}`;
         { wch: 25 }, // Email
         { wch: 12 }, // Statut
         { wch: 15 }, // Date
-        { wch: 8 },  // Année
+        { wch: 8 }, // Année
       ];
 
       // Create workbook
@@ -612,7 +656,10 @@ ${emailModal.message}`;
       XLSX.utils.book_append_sheet(wb, ws, "Demandes");
 
       // Generate Excel file
-      XLSX.writeFile(wb, `demandes_attestation_${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.writeFile(
+        wb,
+        `demandes_attestation_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
 
       toast({
         title: "Export réussi",
@@ -621,7 +668,8 @@ ${emailModal.message}`;
     } catch (error) {
       toast({
         title: "Erreur d'export",
-        description: "Impossible de générer le fichier Excel. Veuillez réessayer.",
+        description:
+          "Impossible de générer le fichier Excel. Veuillez réessayer.",
         variant: "destructive",
       });
     }
@@ -663,27 +711,37 @@ ${emailModal.message}`;
         }
 
         // Add logo to PDF
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (doc as any).addImage(logoDataUrl, "PNG", 15, 10, 40, 20); // x, y, width, height
       } catch (logoError) {
         console.log("Logo could not be loaded, continuing without it");
       }
 
       // Add institution names
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFontSize(22);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setTextColor(29, 78, 216); // Blue color
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFont(undefined, "bold");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).text("OFPPT - ISFO", 105, 35, { align: "center" });
 
       // Add full institution name
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFontSize(14);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setTextColor(0, 0, 0); // Black color
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFont(undefined, "normal");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).text(
         "Office de la Formation Professionnelle et de la Promotion du Travail",
         105,
         45,
         { align: "center" }
       );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).text(
         "Institut Spécialisé de Formation de l'Offshoring Casablanca",
         105,
@@ -692,17 +750,25 @@ ${emailModal.message}`;
       );
 
       // Add report title
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFontSize(16);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setTextColor(0, 0, 0); // Black color
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFont(undefined, "bold");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).text("Liste des Étudiants par Groupe", 105, 62, {
         align: "center",
       });
 
       // Add generation date
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFontSize(12);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setTextColor(0, 0, 0); // Black color
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).setFont(undefined, "normal");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).text(
         `Généré le: ${new Date().toLocaleDateString("fr-FR")}`,
         20,
@@ -720,9 +786,13 @@ ${emailModal.message}`;
         if (groupRequests.length === 0) return;
 
         // Add group title
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (doc as any).setFontSize(16);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (doc as any).setTextColor(29, 78, 216); // Blue color
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (doc as any).setFont(undefined, "bold");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (doc as any).text(`Groupe: ${group}`, 20, yOffset);
 
         // Add count
@@ -742,6 +812,7 @@ ${emailModal.message}`;
         ]);
 
         // Add table
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         autoTable(doc as any, {
           head: [["Nom Prénom", "CIN", "Email", "Statut", "Date"]],
           body: tableData,
@@ -771,15 +842,18 @@ ${emailModal.message}`;
         }
 
         // Add page break if needed
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pageHeight = (doc as any).internal.pageSize.height;
         const marginBottom = 20;
         if (yOffset > pageHeight - marginBottom) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (doc as any).addPage();
           yOffset = 20;
         }
       });
 
       // Save the PDF
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (doc as any).save(
         `liste_etudiants_${new Date().toISOString().split("T")[0]}.pdf`
       );
@@ -815,9 +889,6 @@ ${emailModal.message}`;
           : 0,
     };
   });
-
-  // Add state for student management page
-  const [showStudentManagement, setShowStudentManagement] = useState(false);
 
   // Add function to reset the attestation counter
   const resetAttestationCounter = async () => {
@@ -871,12 +942,94 @@ ${emailModal.message}`;
     // This function is no longer used - replaced by AttestationCounterDialog
   };
 
-  if (showStudentManagement) {
+  // Render different views based on activeView
+
+  /*
+  if (activeView === "students") {
     return (
       <StudentManagement
-        onBack={() => setShowStudentManagement(false)}
+        onBack={() => setActiveView("requests")}
         onLogout={onLogout}
+        onNavigateToSecurity={() => {
+          // First go back to the main dashboard view
+          setActiveView("requests");
+          // Then switch to security view after a short delay to ensure state update
+          setTimeout(() => setActiveView("security"), 0);
+        }}
       />
+    );
+  }
+  */
+
+  if (activeView === "security") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+        {/* Header */}
+        <div className="bg-white/80 backdrop-blur-sm shadow-lg border-b border-blue-200/50 sticky top-0 z-40">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center h-20">
+              <div className="flex items-center">
+                <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-3 rounded-xl shadow-lg">
+                  <Shield className="h-8 w-8 text-white" />
+                </div>
+                <div className="ml-4">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-700 to-indigo-700 bg-clip-text text-transparent">
+                    Tableau de Bord Sécurité
+                  </h1>
+                  <p className="text-sm text-slate-600 font-medium">
+                    Connecté en tant que:{" "}
+                    <span className="text-blue-700">{adminProfile}</span>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={onLogout}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2 bg-white/80 hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800 transition-all duration-200"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Déconnexion
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Bar */}
+        <div className="bg-white/90 backdrop-blur-sm border-b border-slate-200 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex space-x-8">
+              <button
+                onClick={() => setActiveView("requests")}
+                className="py-4 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 font-medium text-sm transition-colors duration-200 flex items-center gap-2"
+              >
+                <FileText className="h-4 w-4" />
+                Gestion des Demandes
+              </button>
+              <button
+                onClick={() => setActiveView("students")}
+                className="py-4 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-3300 font-medium text-sm transition-colors duration-200 flex items-center gap-2"
+              >
+                <User className="h-4 w-4" />
+                Gestion des Étudiants
+              </button>
+              <button
+                onClick={() => setActiveView("security")}
+                className="py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm transition-colors duration-200 flex items-center gap-2 cursor-default"
+              >
+                <Shield className="h-4 w-4" />
+                Sécurité
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <SecurityDashboard />
+        </div>
+      </div>
     );
   }
 
@@ -938,34 +1091,6 @@ ${emailModal.message}`;
             </div>
             <div className="flex items-center gap-3">
               <Button
-                onClick={async () => {
-                  setImportLoading(true);
-                  try {
-                    await importStudents();
-                    toast({
-                      title: "Importation réussie",
-                      description: "Les étudiants ont été importés avec succès.",
-                    });
-                    window.location.reload();
-                  } catch (error) {
-                    toast({
-                      title: "Erreur d'importation",
-                      description: "Une erreur est survenue lors de l'importation.",
-                      variant: "destructive",
-                    });
-                  } finally {
-                    setImportLoading(false);
-                  }
-                }}
-                disabled={importLoading}
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-2 bg-white/80 hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800 transition-all duration-200"
-              >
-                <Users className="h-4 w-4" />
-                {importLoading ? "Importation..." : "Importer les étudiants"}
-              </Button>
-              <Button
                 onClick={onLogout}
                 variant="outline"
                 size="sm"
@@ -982,35 +1107,71 @@ ${emailModal.message}`;
       {/* Navigation Bar */}
       <div className="bg-white/90 backdrop-blur-sm border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
+          <div className="flex space-x-8 overflow-x-auto scrollbar-hide">
             <button
-              onClick={() => {
-                setShowStudentManagement(false);
-              }}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${
-                !showStudentManagement
+              onClick={() => setActiveView("requests")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 whitespace-nowrap ${
+                activeView === "requests"
                   ? "border-blue-500 text-blue-600"
                   : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
               }`}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveView("requests");
+                }
+              }}
+              aria-label="Gestion des demandes"
             >
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
-                Gestion des Demandes
+                <span className="hidden sm:inline">Gestion des Demandes</span>
+                <span className="sm:hidden">Demandes</span>
               </div>
             </button>
             <button
-              onClick={() => {
-                setShowStudentManagement(true);
-              }}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${
-                showStudentManagement
+              onClick={() => setActiveView("students")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 whitespace-nowrap ${
+                activeView === "students"
                   ? "border-blue-500 text-blue-600"
                   : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
               }`}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveView("students");
+                }
+              }}
+              aria-label="Gestion des étudiants"
             >
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4" />
-                Gestion des Étudiants
+                <span className="hidden sm:inline">Gestion des Étudiants</span>
+                <span className="sm:hidden">Étudiants</span>
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveView("security")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 whitespace-nowrap ${
+                activeView === "security"
+                  ? "border-blue-500 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+              }`}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveView("security");
+                }
+              }}
+              aria-label="Sécurité"
+            >
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                <span className="hidden sm:inline">Sécurité</span>
+                <span className="sm:hidden">Sécurité</span>
               </div>
             </button>
           </div>
@@ -1019,541 +1180,537 @@ ${emailModal.message}`;
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Statistics Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-blue-100">
-                Total des demandes
-              </CardTitle>
-              <Users className="h-5 w-5 text-blue-200" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{requests.length}</div>
-              <p className="text-xs text-blue-100 mt-1">
-                +
-                {
-                  requests.filter(
-                    (r) =>
-                      new Date(r.created_at) >
-                      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-                  ).length
-                }{" "}
-                cette semaine
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-amber-100">
-                En attente
-              </CardTitle>
-              <Clock className="h-5 w-5 text-amber-200" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {requests.filter((r) => r.status === "pending").length}
-              </div>
-              <p className="text-xs text-amber-100 mt-1">
-                Nécessitent une action
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-emerald-500 to-green-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-emerald-100">
-                Approuvées
-              </CardTitle>
-              <Check className="h-5 w-5 text-emerald-200" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {requests.filter((r) => r.status === "approved").length}
-              </div>
-              <p className="text-xs text-emerald-100 mt-1">
-                {requests.length > 0
-                  ? Math.round(
-                      (requests.filter((r) => r.status === "approved").length /
-                        requests.length) *
-                        100
-                    )
-                  : 0}
-                % du total
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-red-500 to-rose-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-red-100">
-                Rejetées
-              </CardTitle>
-              <X className="h-5 w-5 text-red-200" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {requests.filter((r) => r.status === "rejected").length}
-              </div>
-              <p className="text-xs text-red-100 mt-1">
-                {requests.length > 0
-                  ? Math.round(
-                      (requests.filter((r) => r.status === "rejected").length /
-                        requests.length) *
-                        100
-                    )
-                  : 0}
-                % du total
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Add Reset Counter Card */}
-          <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-purple-100">
-                Compteur Attestations
-              </CardTitle>
-              <Settings className="h-5 w-5 text-purple-200" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold mb-3 text-center">
-                {counterValue}
-              </div>
-              <div className="space-y-2">
-                <Button
-                  onClick={resetAttestationCounter}
-                  className="w-full bg-white text-purple-600 hover:bg-purple-50 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-200"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Réinitialiser à 0
-                </Button>
-                <Button
-                  onClick={() => {
-                    setShowCounterDialog(true);
-                  }}
-                  className="w-full bg-white/90 text-purple-600 hover:bg-purple-50 font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-200"
-                >
-                  <Settings className="h-4 w-4" />
-                  Modifier
-                </Button>
-              </div>
-              <p className="text-xs text-purple-100 mt-2 text-center">
-                Gérer le compteur d'attestations
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Program Statistics */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-          {filiereStats.map((stat, index) => (
-            <Card
-              key={stat.filiere}
-              className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-            >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <div
-                    className={`p-2 rounded-lg ${
-                      index === 0
-                        ? "bg-purple-100 text-purple-600"
-                        : index === 1
-                        ? "bg-teal-100 text-teal-600"
-                        : index === 2
-                        ? "bg-orange-100 text-orange-600"
-                        : "bg-pink-100 text-pink-600"
-                    }`}
-                  >
-                    <GraduationCap className="h-4 w-4" />
-                  </div>
-                  {stat.filiere}
-                </CardTitle>
-                <Badge
-                  variant="secondary"
-                  className="bg-slate-100 text-slate-700 font-medium"
-                >
-                  {stat.total}
-                </Badge>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">Approuvées:</span>
-                    <span className="font-bold text-emerald-600">
-                      {stat.approved}
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-200 rounded-full h-2.5">
-                    <div
-                      className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-2.5 rounded-full transition-all duration-500 ease-out"
-                      style={{
-                        width: `${
-                          stat.total > 0
-                            ? (stat.approved / stat.total) * 100
-                            : 0
-                        }%`,
-                      }}
-                    ></div>
-                  </div>
-                  <p className="text-xs text-slate-600 font-medium">
-                    Taux d'approbation:{" "}
-                    <span className="text-emerald-600 font-bold">
-                      {stat.approvalRate}%
-                    </span>
+        {activeView === "students" ? (
+          <StudentManagement
+            onBack={() => setActiveView("requests")}
+            onLogout={onLogout}
+          />
+        ) : activeView === "security" ? (
+          <SecurityDashboard />
+        ) : (
+          <>
+            {/* Statistics Overview */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              {/* Total Requests Card */}
+              <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-md hover:shadow-lg transition-all duration-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-blue-100">
+                    Total des demandes
+                  </CardTitle>
+                  <Users className="h-4 w-4 text-blue-200" />
+                </CardHeader>
+                <CardContent className="pb-2">
+                  <div className="text-2xl font-bold">{requests.length}</div>
+                  <p className="text-xs text-blue-100 mt-1">
+                    +
+                    {
+                      requests.filter(
+                        (r) =>
+                          new Date(r.created_at) >
+                          new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                      ).length
+                    }{" "}
+                    cette semaine
                   </p>
+                </CardContent>
+              </Card>
+
+              {/* Pending Requests Card */}
+              <Card className="bg-gradient-to-br from-amber-500 to-amber-600 text-white border-0 shadow-md hover:shadow-lg transition-all duration-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-amber-100">
+                    En attente
+                  </CardTitle>
+                  <Clock className="h-4 w-4 text-amber-200" />
+                </CardHeader>
+                <CardContent className="pb-2">
+                  <div className="text-2xl font-bold">
+                    {requests.filter((r) => r.status === "pending").length}
+                  </div>
+                  <p className="text-xs text-amber-100 mt-1">
+                    Nécessitent une action
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Approved Requests Card */}
+              <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0 shadow-md hover:shadow-lg transition-all duration-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-emerald-100">
+                    Approuvées
+                  </CardTitle>
+                  <Check className="h-4 w-4 text-emerald-200" />
+                </CardHeader>
+                <CardContent className="pb-2">
+                  <div className="text-2xl font-bold">
+                    {requests.filter((r) => r.status === "approved").length}
+                  </div>
+                  <p className="text-xs text-emerald-100 mt-1">
+                    {requests.length > 0
+                      ? `${Math.round(
+                          (requests.filter((r) => r.status === "approved")
+                            .length /
+                            requests.length) *
+                            100
+                        )}% du total`
+                      : "0% du total"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Add Reset Counter Card */}
+              <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-0 shadow-md hover:shadow-lg transition-all duration-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-purple-100">
+                    Compteur Attestations
+                  </CardTitle>
+                  <Settings className="h-4 w-4 text-purple-200" />
+                </CardHeader>
+                <CardContent className="pb-2">
+                  <div className="text-2xl font-bold mb-2">{counterValue}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={resetAttestationCounter}
+                      className="flex-1 bg-white text-purple-600 hover:bg-purple-50 font-medium py-1 px-2 rounded text-xs flex items-center justify-center gap-1 transition-all duration-200"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Réinit.
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setShowCounterDialog(true);
+                      }}
+                      className="flex-1 bg-white/90 text-purple-600 hover:bg-purple-50 font-medium py-1 px-2 rounded text-xs flex items-center justify-center gap-1 transition-all duration-200"
+                    >
+                      <Settings className="h-3 w-3" />
+                      Modifier
+                    </Button>
+                  </div>
+                  <p className="text-xs text-purple-100 mt-2 text-center">
+                    Gérer compteur
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Program Statistics */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+              {filiereStats.map((stat, index) => (
+                <Card
+                  key={stat.filiere}
+                  className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-md hover:shadow-lg transition-all duration-300 scale-95"
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 pt-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <div
+                        className={`p-2 rounded-lg ${
+                          index === 0
+                            ? "bg-purple-100 text-purple-600"
+                            : index === 1
+                            ? "bg-teal-100 text-teal-600"
+                            : index === 2
+                            ? "bg-orange-100 text-orange-600"
+                            : "bg-pink-100 text-pink-600"
+                        }`}
+                      >
+                        <GraduationCap className="h-4 w-4" />
+                      </div>
+                      {stat.filiere}
+                    </CardTitle>
+                    <Badge
+                      variant="secondary"
+                      className="bg-slate-100 text-slate-700 border-slate-300 font-medium"
+                    >
+                      {stat.total}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="pb-3 pt-1">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">Approuvées:</span>
+                        <span className="font-bold text-emerald-600">
+                          {stat.approved}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2.5">
+                        <div
+                          className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+                          style={{
+                            width: `${
+                              stat.total > 0
+                                ? (stat.approved / stat.total) * 100
+                                : 0
+                            }%`,
+                          }}
+                        ></div>
+                      </div>
+                      <p className="text-xs text-slate-600 font-medium">
+                        Taux d'approbation:{" "}
+                        <span className="text-emerald-600 font-bold">
+                          {stat.approvalRate}%
+                        </span>
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Filters and Actions */}
+            <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg scale-95">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FilterIcon className="h-5 w-5 text-blue-600" />
+                  </div>
+                  Filtres et Actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="group"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Groupe
+                    </Label>
+                    <Select
+                      value={selectedGroup}
+                      onValueChange={setSelectedGroup}
+                    >
+                      <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
+                        <SelectValue placeholder="Tous les groupes" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
+                        <SelectItem value="all">Tous les groupes</SelectItem>
+                        {STUDENT_GROUPS.map((group) => (
+                          <SelectItem key={group} value={group}>
+                            {group}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="status"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Statut
+                    </Label>
+                    <Select
+                      value={selectedStatus}
+                      onValueChange={setSelectedStatus}
+                    >
+                      <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
+                        <SelectValue placeholder="Tous les statuts" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
+                        <SelectItem value="all">Tous les statuts</SelectItem>
+                        <SelectItem value="pending">En attente</SelectItem>
+                        <SelectItem value="approved">Approuvé</SelectItem>
+                        <SelectItem value="rejected">Rejeté</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="date"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Date
+                    </Label>
+                    <Input
+                      type="date"
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value)}
+                      className="bg-white border-slate-200 hover:border-blue-300 transition-colors"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="hour"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Période
+                    </Label>
+                    <Select value={hourFilter} onValueChange={setHourFilter}>
+                      <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
+                        <SelectValue placeholder="Toute la journée" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
+                        <SelectItem value="all">Toute la journée</SelectItem>
+                        <SelectItem value="morning">Matin (6h-12h)</SelectItem>
+                        <SelectItem value="afternoon">
+                          Après-midi (12h-18h)
+                        </SelectItem>
+                        <SelectItem value="evening">Soir (18h-24h)</SelectItem>
+                        <SelectItem value="night">Nuit (0h-6h)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="search"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Recherche
+                    </Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <Input
+                        placeholder="Nom, prénom, CIN..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 bg-white border-slate-200 hover:border-blue-300 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700">
+                      Actions
+                    </Label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Button
+                        onClick={exportStudentsToPDF}
+                        variant="outline"
+                        className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
+                      >
+                        <Download className="h-3 w-3 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:ml-2 sm:inline">PDF</span>
+                      </Button>
+                      <Button
+                        onClick={exportRequestsToExcel}
+                        variant="outline"
+                        className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
+                      >
+                        <Download className="h-3 w-3 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:ml-2 sm:inline">Excel</span>
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
 
-        {/* Filters and Actions */}
-        <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
-            <CardTitle className="flex items-center gap-2 text-slate-700">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FilterIcon className="h-5 w-5 text-blue-600" />
-              </div>
-              Filtres et Actions
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-4">
-              <div className="space-y-2">
-                <Label
-                  htmlFor="group"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Groupe
-                </Label>
-                <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
-                    <SelectValue placeholder="Tous les groupes" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
-                    <SelectItem value="all">Tous les groupes</SelectItem>
-                    {STUDENT_GROUPS.map((group) => (
-                      <SelectItem key={group} value={group}>
-                        {group}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Requests Table */}
+            <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg scale-95">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                  </div>
+                  Demandes d'attestation ({filteredRequests.length})
+                </CardTitle>
+                <CardDescription className="text-slate-600">
+                  Gérez les demandes d'attestation de scolarité par groupe
+                  d'étudiants
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="space-y-8">
+                  {STUDENT_GROUPS.map((group) => {
+                    const groupRequests = filteredRequests.filter(
+                      (req) => req.student_group === group
+                    );
 
-              <div className="space-y-2">
-                <Label
-                  htmlFor="status"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Statut
-                </Label>
-                <Select
-                  value={selectedStatus}
-                  onValueChange={setSelectedStatus}
-                >
-                  <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
-                    <SelectValue placeholder="Tous les statuts" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
-                    <SelectItem value="all">Tous les statuts</SelectItem>
-                    <SelectItem value="pending">En attente</SelectItem>
-                    <SelectItem value="approved">Approuvé</SelectItem>
-                    <SelectItem value="rejected">Rejeté</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                    if (groupRequests.length === 0) return null;
 
-              <div className="space-y-2">
-                <Label
-                  htmlFor="date"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Date
-                </Label>
-                <Input
-                  type="date"
-                  value={dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value)}
-                  className="bg-white border-slate-200 hover:border-blue-300 transition-colors"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="hour"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Période
-                </Label>
-                <Select value={hourFilter} onValueChange={setHourFilter}>
-                  <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
-                    <SelectValue placeholder="Toute la journée" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
-                    <SelectItem value="all">Toute la journée</SelectItem>
-                    <SelectItem value="morning">Matin (6h-12h)</SelectItem>
-                    <SelectItem value="afternoon">
-                      Après-midi (12h-18h)
-                    </SelectItem>
-                    <SelectItem value="evening">Soir (18h-24h)</SelectItem>
-                    <SelectItem value="night">Nuit (0h-6h)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="search"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Recherche
-                </Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Nom, prénom, CIN..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 bg-white border-slate-200 hover:border-blue-300 transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-slate-700">
-                  Actions
-                </Label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button
-                    onClick={exportStudentsToPDF}
-                    variant="outline"
-                    className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
-                  >
-                    <Download className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:ml-2 sm:inline">
-                      PDF
-                    </span>
-                  </Button>
-                  <Button
-                    onClick={exportRequestsToExcel}
-                    variant="outline"
-                    className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
-                  >
-                    <Download className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:ml-2 sm:inline">
-                      Excel
-                    </span>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Requests Table */}
-        <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
-            <CardTitle className="flex items-center gap-2 text-slate-700">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FileText className="h-5 w-5 text-blue-600" />
-              </div>
-              Demandes d'attestation ({filteredRequests.length})
-            </CardTitle>
-            <CardDescription className="text-slate-600">
-              Gérez les demandes d'attestation de scolarité par groupe
-              d'étudiants
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="space-y-8">
-              {STUDENT_GROUPS.map((group) => {
-                const groupRequests = filteredRequests.filter(
-                  (req) => req.student_group === group
-                );
-
-                if (groupRequests.length === 0) return null;
-
-                return (
-                  <div
-                    key={group}
-                    className="border-2 border-slate-200 rounded-xl p-6 bg-gradient-to-br from-white to-slate-50 shadow-sm hover:shadow-md transition-all duration-300"
-                  >
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-xl font-bold text-slate-800 flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 rounded-lg">
-                          <GraduationCap className="h-6 w-6 text-blue-600" />
-                        </div>
-                        Groupe {group}
-                        <Badge
-                          variant="secondary"
-                          className="ml-2 bg-blue-100 text-blue-800 font-bold text-sm px-3 py-1"
-                        >
-                          {groupRequests.length} demande
-                          {groupRequests.length > 1 ? "s" : ""}
-                        </Badge>
-                      </h3>
-                      <Badge
-                        variant="outline"
-                        className="bg-slate-100 text-slate-700 border-slate-300 font-medium px-3 py-1"
+                    return (
+                      <div
+                        key={group}
+                        className="border-2 border-slate-200 rounded-xl p-6 bg-gradient-to-br from-white to-slate-50 shadow-sm hover:shadow-md transition-all duration-300 scale-95"
                       >
-                        {getFiliere(group)}
-                      </Badge>
-                    </div>
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <GraduationCap className="h-6 w-6 text-blue-600" />
+                            </div>
+                            Groupe {group}
+                            <Badge
+                              variant="secondary"
+                              className="ml-2 bg-blue-100 text-blue-800 font-bold text-sm px-3 py-1"
+                            >
+                              {groupRequests.length} demande
+                              {groupRequests.length > 1 ? "s" : ""}
+                            </Badge>
+                          </h3>
+                          <Badge
+                            variant="outline"
+                            className="bg-slate-100 text-slate-700 border-slate-300 font-medium px-3 py-1"
+                          >
+                            {getFiliere(group)}
+                          </Badge>
+                        </div>
 
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-gradient-to-r from-slate-50 to-blue-50 hover:bg-slate-50">
-                              <TableHead className="font-semibold text-slate-700 min-w-[120px]">
-                                Étudiant
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[80px]">
-                                CIN
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[200px] hidden sm:table-cell">
-                                Email
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[100px]">
-                                Statut
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[80px] hidden md:table-cell">
-                                Date
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[120px]">
-                                Demandes/an
-                              </TableHead>
-                              <TableHead className="font-semibold text-slate-700 min-w-[120px]">
-                                Actions
-                              </TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {groupRequests.map((request) => (
-                              <TableRow
-                                key={request.id}
-                                className="hover:bg-blue-50/50 transition-colors duration-200"
-                              >
-                                <TableCell className="font-medium text-slate-800">
-                                  {request.first_name} {request.last_name}
-                                </TableCell>
-                                <TableCell className="text-slate-600">
-                                  {request.cin}
-                                </TableCell>
-                                <TableCell className="text-slate-600 hidden sm:table-cell">
-                                  {request.students?.email || "N/A"}
-                                </TableCell>
-                                <TableCell>
-                                  <div
-                                    className={`inline-flex items-center gap-2 px-33 py-1 rounded-full border text-xs font-medium ${getStatusColor(
-                                      request.status
-                                    )}`}
+                        <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="bg-gradient-to-r from-slate-50 to-blue-50 hover:bg-slate-50">
+                                  <TableHead className="font-semibold text-slate-700 min-w-[120px]">
+                                    Étudiant
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[80px]">
+                                    CIN
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[200px] hidden sm:table-cell">
+                                    Email
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[100px]">
+                                    Statut
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[80px] hidden md:table-cell">
+                                    Date
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[120px]">
+                                    Demandes/an
+                                  </TableHead>
+                                  <TableHead className="font-semibold text-slate-700 min-w-[120px]">
+                                    Actions
+                                  </TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {groupRequests.map((request) => (
+                                  <TableRow
+                                    key={request.id}
+                                    className="hover:bg-blue-50/50 transition-colors duration-200"
                                   >
-                                    {getStatusIcon(request.status)}
-                                    {getStatusLabel(request.status)}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-slate-600 hidden md:table-cell">
-                                  {new Date(
-                                    request.created_at
-                                  ).toLocaleDateString("fr-FR")}
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-1 text-sm">
-                                    <Badge
-                                      variant="secondary"
-                                      className="text-xs"
-                                    >
+                                    <TableCell className="font-medium text-slate-800">
+                                      {request.first_name} {request.last_name}
+                                    </TableCell>
+                                    <TableCell className="text-slate-600">
+                                      {request.cin}
+                                    </TableCell>
+                                    <TableCell className="text-slate-600 hidden sm:table-cell">
+                                      {request.students?.email || "N/A"}
+                                    </TableCell>
+                                    <TableCell>
+                                      <div
+                                        className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${getStatusColor(
+                                          request.status
+                                        )}`}
+                                      >
+                                        {getStatusIcon(request.status)}
+                                        {getStatusLabel(request.status)}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-slate-600 hidden md:table-cell">
                                       {new Date(
                                         request.created_at
-                                      ).getFullYear()}
-                                      :{" "}
-                                      {getStudentRequestCount(
-                                        request.student_id,
-                                        new Date(
-                                          request.created_at
-                                        ).getFullYear()
-                                      )}
-                                    </Badge>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-1 sm:gap-2">
-                                     <Button
-                                      onClick={() =>
-                                        updateStatus(request.id, "approved")
-                                      }
-                                      size="sm"
-                                      className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
-                                      disabled={request.status === "approved"}
-                                    >
-                                      <Check className="h-3 w-3 sm:h-4 sm:w-4" />
-                                      <span className="hidden sm:ml-2 sm:inline">
-                                        Approuver
-                                      </span>
-                                    </Button>
-                                    {request.status === "approved" && (
-                                      <Button
-                                        onClick={() =>
-                                          generateAttestation(request)
-                                        }
-                                        size="sm"
-                                        variant="outline"
-                                        className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
-                                      >
-                                        <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
-                                        <span className="hidden sm:ml-2 sm:inline">
-                                          Voir
-                                        </span>
-                                      </Button>
-                                    )}
-                                    <Button
-                                      onClick={() => deleteRequest(request.id)}
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
-                                    >
-                                      <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
-                                      <span className="hidden sm:ml-2 sm:inline">
-                                        Supprimer
-                                      </span>
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                                      ).toLocaleDateString("fr-FR")}
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-1 text-sm">
+                                        <Badge
+                                          variant="secondary"
+                                          className="text-xs"
+                                        >
+                                          {new Date(
+                                            request.created_at
+                                          ).getFullYear()}
+                                          :{" "}
+                                          {getStudentRequestCount(
+                                            request.student_id,
+                                            new Date(
+                                              request.created_at
+                                            ).getFullYear()
+                                          )}
+                                        </Badge>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-1 sm:gap-2">
+                                        <Button
+                                          onClick={() =>
+                                            updateStatus(request.id, "approved")
+                                          }
+                                          size="sm"
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
+                                          disabled={
+                                            request.status === "approved"
+                                          }
+                                        >
+                                          <Check className="h-3 w-3 sm:h-4 sm:w-4" />
+                                          <span className="hidden sm:ml-2 sm:inline">
+                                            Approuver
+                                          </span>
+                                        </Button>
+                                        {request.status === "approved" && (
+                                          <Button
+                                            onClick={() =>
+                                              generateAttestation(request)
+                                            }
+                                            size="sm"
+                                            variant="outline"
+                                            className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
+                                          >
+                                            <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
+                                            <span className="hidden sm:ml-2 sm:inline">
+                                              Voir
+                                            </span>
+                                          </Button>
+                                        )}
+                                        <Button
+                                          onClick={() =>
+                                            deleteRequest(request.id)
+                                          }
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 shadow-sm hover:shadow-md transition-all duration-200 h-8 w-8 p-0 sm:h-9 sm:w-auto sm:px-3"
+                                        >
+                                          <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                                          <span className="hidden sm:ml-2 sm:inline">
+                                            Supprimer
+                                          </span>
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
 
-              {filteredRequests.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="p-4 bg-slate-100 rounded-full w-24 h-24 mx-auto mb-6 flex items-center justify-center">
-                    <AlertCircle className="h-12 w-12 text-slate-400" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-700 mb-2">
-                    Aucune demande trouvée
-                  </h3>
-                  <p className="text-slate-500 max-w-md mx-auto">
-                    Aucune demande ne correspond aux filtres sélectionnés.
-                    Essayez de modifier vos critères de recherche.
-                  </p>
+                  {filteredRequests.length === 0 && (
+                    <div className="text-center py-16">
+                      <div className="p-4 bg-slate-100 rounded-full w-24 h-24 mx-auto mb-6 flex items-center justify-center">
+                        <AlertCircle className="h-12 w-12 text-slate-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-slate-700 mb-2">
+                        Aucune demande trouvée
+                      </h3>
+                      <p className="text-slate-500 max-w-md mx-auto">
+                        Aucune demande ne correspond aux filtres sélectionnés.
+                        Essayez de modifier vos critères de recherche.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Modale d'envoi d'email */}
-      <Dialog open={emailModal.isOpen} onOpenChange={(open) => setEmailModal(prev => ({ ...prev, isOpen: open }))}>
+      <Dialog
+        open={emailModal.isOpen}
+        onOpenChange={(open) =>
+          setEmailModal((prev) => ({ ...prev, isOpen: open }))
+        }
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Envoyer un email à l'étudiant</DialogTitle>
@@ -1561,29 +1718,29 @@ ${emailModal.message}`;
               Copiez le contenu ci-dessous ou utilisez votre client email.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div>
               <Label htmlFor="email-to">À :</Label>
               <Input id="email-to" value={emailModal.email} disabled />
             </div>
-            
+
             <div>
               <Label htmlFor="email-subject">Objet :</Label>
               <Input id="email-subject" value={emailModal.subject} disabled />
             </div>
-            
+
             <div>
               <Label htmlFor="email-message">Message :</Label>
-              <Textarea 
-                id="email-message" 
-                value={emailModal.message} 
+              <Textarea
+                id="email-message"
+                value={emailModal.message}
                 disabled
                 className="min-h-[250px] font-mono text-sm"
               />
             </div>
           </div>
-          
+
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={copyEmailToClipboard}>
               Copier
@@ -1591,7 +1748,12 @@ ${emailModal.message}`;
             <Button onClick={openEmailClient}>
               Ouvrir dans mon client email
             </Button>
-            <Button variant="secondary" onClick={() => setEmailModal(prev => ({ ...prev, isOpen: false }))}>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setEmailModal((prev) => ({ ...prev, isOpen: false }))
+              }
+            >
               Fermer
             </Button>
           </DialogFooter>
@@ -1599,7 +1761,10 @@ ${emailModal.message}`;
       </Dialog>
 
       {/* Dialog pour saisir manuellement le numéro d'attestation */}
-      <Dialog open={showAttestationCounterInput} onOpenChange={setShowAttestationCounterInput}>
+      <Dialog
+        open={showAttestationCounterInput}
+        onOpenChange={setShowAttestationCounterInput}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1607,10 +1772,11 @@ ${emailModal.message}`;
               Définir le Numéro d'Attestation
             </DialogTitle>
             <DialogDescription>
-              Entrez le numéro d'attestation à utiliser pour ce document. Le compteur global sera mis à jour avec cette valeur.
+              Entrez le numéro d'attestation à utiliser pour ce document. Le
+              compteur global sera mis à jour avec cette valeur.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div>
               <Label htmlFor="attestation-number">Numéro d'attestation</Label>
@@ -1628,7 +1794,7 @@ ${emailModal.message}`;
               </p>
             </div>
           </div>
-          
+
           <DialogFooter className="gap-2">
             <Button
               variant="outline"

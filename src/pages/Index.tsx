@@ -11,7 +11,24 @@ const Index = () => {
   const location = useLocation();
   const [currentView, setCurrentView] = useState<
     "student" | "admin-login" | "admin-dashboard"
-  >(location.pathname === "/admin" ? "admin-login" : "student");
+  >(() => {
+    // Check localStorage for persisted state
+    const savedView = localStorage.getItem("currentView");
+    const savedAdmin = localStorage.getItem("loggedInAdmin");
+
+    // If we have a saved admin session and were in admin dashboard, restore that state
+    if (
+      savedAdmin &&
+      savedView === "admin-dashboard" &&
+      location.pathname === "/admin"
+    ) {
+      return "admin-dashboard";
+    }
+
+    // Default behavior
+    return location.pathname === "/admin" ? "admin-login" : "student";
+  });
+
   const [loggedInAdmin, setLoggedInAdmin] = useState<string | null>(() => {
     // Récupérer l'état de connexion depuis le localStorage au chargement
     const savedAdmin = localStorage.getItem("loggedInAdmin");
@@ -28,11 +45,18 @@ const Index = () => {
     }
   }, [loggedInAdmin, location.pathname]);
 
+  // Persist currentView to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem("currentView", currentView);
+  }, [currentView]);
+
   const handleAdminLogin = (profile: string) => {
     setLoggedInAdmin(profile);
     setCurrentView("admin-dashboard");
     // Sauvegarder l'état de connexion dans le localStorage
     localStorage.setItem("loggedInAdmin", profile);
+    // Also persist the view state
+    localStorage.setItem("currentView", "admin-dashboard");
   };
 
   const handleLogout = () => {
@@ -40,6 +64,8 @@ const Index = () => {
     setCurrentView("student");
     // Supprimer l'état de connexion du localStorage
     localStorage.removeItem("loggedInAdmin");
+    // Also remove the view state
+    localStorage.removeItem("currentView");
   };
 
   if (currentView === "admin-login") {

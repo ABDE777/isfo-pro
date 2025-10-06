@@ -125,6 +125,48 @@ export type Database = {
           },
         ]
       }
+      login_audit: {
+        Row: {
+          city: string | null
+          country: string | null
+          created_at: string
+          device_info: string | null
+          id: string
+          ip_address: string | null
+          login_timestamp: string
+          success: boolean
+          user_agent: string | null
+          user_email: string
+          user_type: string
+        }
+        Insert: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          device_info?: string | null
+          id?: string
+          ip_address?: string | null
+          login_timestamp?: string
+          success?: boolean
+          user_agent?: string | null
+          user_email: string
+          user_type: string
+        }
+        Update: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          device_info?: string | null
+          id?: string
+          ip_address?: string | null
+          login_timestamp?: string
+          success?: boolean
+          user_agent?: string | null
+          user_email?: string
+          user_type?: string
+        }
+        Relationships: []
+      }
       students: {
         Row: {
           birth_date: string

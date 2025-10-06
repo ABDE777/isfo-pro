@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Mail, User, ArrowRight, Key, AlertCircle, Info } from "lucide-react";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { trackLogin } from "@/utils/loginAudit";
 
 interface StudentInfo {
   id: string;
@@ -135,6 +136,12 @@ export const StudentAuth: React.FC<StudentAuthProps> = ({
         .single();
 
       if (studentError || !studentData) {
+        // Track failed login
+        await trackLogin({
+          userEmail: email,
+          userType: 'student',
+          success: false,
+        });
         toast({
           title: "Erreur de connexion",
           description: "Email ou mot de passe incorrect",
@@ -157,6 +164,13 @@ export const StudentAuth: React.FC<StudentAuthProps> = ({
       // Store credentials in localStorage for session persistence
       localStorage.setItem("student_email", email);
       localStorage.setItem("student_password", password);
+
+      // Track successful login
+      await trackLogin({
+        userEmail: email,
+        userType: 'student',
+        success: true,
+      });
 
       toast({
         title: "Connexion réussie",

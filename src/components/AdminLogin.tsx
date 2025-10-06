@@ -19,6 +19,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Shield, LogIn } from "lucide-react";
+import { trackLogin } from "@/utils/loginAudit";
 
 interface AdminLoginProps {
   onLogin: (profile: string) => void;
@@ -60,6 +61,12 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
         .single();
 
       if (error || !data) {
+        // Track failed login
+        await trackLogin({
+          userEmail: profile,
+          userType: 'admin',
+          success: false,
+        });
         toast({
           title: "Erreur de connexion",
           description: "Profil ou mot de passe incorrect.",
@@ -70,6 +77,13 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
 
       // Vérification du mot de passe
       if (password === data.password) {
+        // Track successful login
+        await trackLogin({
+          userEmail: profile,
+          userType: 'admin',
+          success: true,
+        });
+        
         localStorage.setItem("loggedInAdmin", data.profile_name);
         onLogin(data.profile_name);
         toast({
@@ -77,6 +91,12 @@ const AdminLogin = ({ onLogin }: AdminLoginProps) => {
           description: `Bienvenue ${data.profile_name}`,
         });
       } else {
+        // Track failed login
+        await trackLogin({
+          userEmail: profile,
+          userType: 'admin',
+          success: false,
+        });
         toast({
           title: "Erreur de connexion",
           description: "Profil ou mot de passe incorrect.",

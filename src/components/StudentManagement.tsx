@@ -31,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -50,6 +51,7 @@ import {
   Settings,
   LogOut,
 } from "lucide-react";
+import { CSVImportDialog } from "./CSVImportDialog";
 import ofpptLogo from "@/assets/ofppt-logo.png";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
@@ -70,6 +72,11 @@ interface Student {
   formation_mode: string;
   formation_year: string;
   password_hash: string | null;
+}
+
+// Add interface for formation levels by group
+interface FormationLevelsByGroup {
+  [group: string]: string[];
 }
 
 // Add interface for student editing form
@@ -106,7 +113,7 @@ const STUDENT_GROUPS = [
   "DEV105",
   "DEV106",
   "DEV107",
-  "D101",
+  "ID101",
   "ID102",
   "ID103",
   "ID104",
@@ -126,8 +133,10 @@ export const StudentManagement = ({
   const [loading, setLoading] = useState(true);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editingStudentForm, setEditingStudentForm] =
-    useState<StudentEditForm | null>(null); // Add this state
+    useState<StudentEditForm | null>(null);
   const [addingStudent, setAddingStudent] = useState<boolean>(false);
+  const [showCSVImport, setShowCSVImport] = useState(false);
+  const [currentPage, setCurrentPage] = useState<string>("DEVOWFS"); // For pagination
 
   // Get current year and next year for formation year
   const currentYear = new Date().getFullYear();
@@ -149,6 +158,11 @@ export const StudentManagement = ({
     formation_year: defaultFormationYear, // Set default formation year
     password_hash: "",
   });
+
+  // Add state for password visibility
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -331,14 +345,16 @@ export const StudentManagement = ({
     try {
       // Prepare data for Excel
       const excelData = filteredStudents.map((student) => ({
-        "Prénom": student.first_name,
-        "Nom": student.last_name,
-        "CIN": student.cin,
-        "Email": student.email,
-        "Date de naissance": new Date(student.birth_date).toLocaleDateString("fr-FR"),
+        Prénom: student.first_name,
+        Nom: student.last_name,
+        CIN: student.cin,
+        Email: student.email,
+        "Date de naissance": new Date(student.birth_date).toLocaleDateString(
+          "fr-FR"
+        ),
         "Niveau de formation": student.formation_level,
-        "Spécialité": student.speciality,
-        "Groupe": student.student_group,
+        Spécialité: student.speciality,
+        Groupe: student.student_group,
         "N° d'inscription": student.inscription_number,
         "Type de formation": student.formation_type,
         "Mode de formation": student.formation_mode,
@@ -347,9 +363,9 @@ export const StudentManagement = ({
 
       // Create worksheet
       const ws = XLSX.utils.json_to_sheet(excelData);
-      
+
       // Set column widths
-      ws['!cols'] = [
+      ws["!cols"] = [
         { wch: 15 }, // Prénom
         { wch: 15 }, // Nom
         { wch: 12 }, // CIN
@@ -369,7 +385,10 @@ export const StudentManagement = ({
       XLSX.utils.book_append_sheet(wb, ws, "Étudiants");
 
       // Generate Excel file
-      XLSX.writeFile(wb, `etudiants_${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.writeFile(
+        wb,
+        `etudiants_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
 
       toast({
         title: "Export réussi",
@@ -378,7 +397,8 @@ export const StudentManagement = ({
     } catch (error) {
       toast({
         title: "Erreur d'export",
-        description: "Impossible de générer le fichier Excel. Veuillez réessayer.",
+        description:
+          "Impossible de générer le fichier Excel. Veuillez réessayer.",
         variant: "destructive",
       });
     }
@@ -447,28 +467,30 @@ export const StudentManagement = ({
         }
 
         // Add logo to PDF
-        (doc as any).addImage(logoDataUrl, "PNG", 15, 10, 40, 20); // x, y, width, height
+        const pdfDoc = doc as unknown as any;
+        pdfDoc.addImage(logoDataUrl, "PNG", 15, 10, 40, 20); // x, y, width, height
       } catch (logoError) {
         console.log("Logo could not be loaded, continuing without it");
       }
 
       // Add institution names
-      (doc as any).setFontSize(22);
-      (doc as any).setTextColor(29, 78, 216); // Blue color
-      (doc as any).setFont(undefined, "bold");
-      (doc as any).text("OFPPT - ISFO", 148, 25, { align: "center" });
+      const pdfDoc = doc as unknown as any;
+      pdfDoc.setFontSize(22);
+      pdfDoc.setTextColor(29, 78, 216); // Blue color
+      pdfDoc.setFont(undefined, "bold");
+      pdfDoc.text("OFPPT - ISFO", 148, 25, { align: "center" });
 
       // Add full institution name
-      (doc as any).setFontSize(14);
-      (doc as any).setTextColor(0, 0, 0); // Black color
-      (doc as any).setFont(undefined, "normal");
-      (doc as any).text(
+      pdfDoc.setFontSize(14);
+      pdfDoc.setTextColor(0, 0, 0); // Black color
+      pdfDoc.setFont(undefined, "normal");
+      pdfDoc.text(
         "Office de la Formation Professionnelle et de la Promotion du Travail",
         148,
         35,
         { align: "center" }
       );
-      (doc as any).text(
+      pdfDoc.text(
         "Institut Spécialisé de Formation de l'Offshoring Casablanca",
         148,
         42,
@@ -476,16 +498,16 @@ export const StudentManagement = ({
       );
 
       // Add title
-      (doc as any).setFontSize(18);
-      (doc as any).setTextColor(0, 0, 0); // Black color
-      (doc as any).setFont(undefined, "bold");
-      (doc as any).text("Liste des Étudiants", 14, 55);
+      pdfDoc.setFontSize(18);
+      pdfDoc.setTextColor(0, 0, 0); // Black color
+      pdfDoc.setFont(undefined, "bold");
+      pdfDoc.text("Liste des Étudiants", 14, 55);
 
       // Add date
-      (doc as any).setFontSize(12);
-      (doc as any).setTextColor(0, 0, 0); // Black color
-      (doc as any).setFont(undefined, "normal");
-      (doc as any).text(
+      pdfDoc.setFontSize(12);
+      pdfDoc.setTextColor(0, 0, 0); // Black color
+      pdfDoc.setFont(undefined, "normal");
+      pdfDoc.text(
         `Date d'export: ${new Date().toLocaleDateString("fr-FR")}`,
         14,
         65
@@ -501,7 +523,7 @@ export const StudentManagement = ({
       });
 
       let startY = 75;
-      const pageHeight = (doc as any).internal.pageSize.height;
+      const pageHeight = (doc as unknown as any).internal.pageSize.height;
       const marginBottom = 20;
 
       // Add each group as a separate section
@@ -509,17 +531,17 @@ export const StudentManagement = ({
         ([groupName, students], index) => {
           // Calculate if we need a new page
           if (index > 0 && startY > pageHeight - marginBottom) {
-            (doc as any).addPage();
+            (doc as unknown as any).addPage();
             startY = 20;
           } else if (index > 0) {
             startY += 10;
           }
 
           // Add group title
-          (doc as any).setFontSize(14);
-          (doc as any).setTextColor(29, 78, 216); // Blue color
-          (doc as any).setFont(undefined, "bold");
-          (doc as any).text(
+          (doc as unknown as any).setFontSize(14);
+          (doc as unknown as any).setTextColor(29, 78, 216); // Blue color
+          (doc as unknown as any).setFont(undefined, "bold");
+          (doc as unknown as any).text(
             `Groupe: ${groupName} (${students.length} étudiants)`,
             14,
             startY
@@ -878,7 +900,7 @@ export const StudentManagement = ({
         });
         return;
       }
-      
+
       if (!newStudent.last_name.trim()) {
         toast({
           title: "Erreur de validation",
@@ -887,7 +909,7 @@ export const StudentManagement = ({
         });
         return;
       }
-      
+
       if (!newStudent.email.trim() || !newStudent.email.includes("@")) {
         toast({
           title: "Erreur de validation",
@@ -948,12 +970,57 @@ export const StudentManagement = ({
     }
   };
 
+  // Function to get formation levels by group with filtering logic
+  const getFormationLevelsByGroup = (): FormationLevelsByGroup => {
+    const levelsByGroup: FormationLevelsByGroup = {};
+
+    // Group students by their group and collect formation levels
+    students.forEach((student) => {
+      const group = student.student_group;
+      const level = student.formation_level;
+
+      if (!levelsByGroup[group]) {
+        levelsByGroup[group] = [];
+      }
+
+      // Add level if not already in the array
+      if (!levelsByGroup[group].includes(level)) {
+        levelsByGroup[group].push(level);
+      }
+    });
+
+    // Apply filtering logic: if there are two formation levels and one is "Technicien spécialisé", keep only that
+    Object.keys(levelsByGroup).forEach((group) => {
+      const levels = levelsByGroup[group];
+      if (levels.length === 2 && levels.includes("Technicien spécialisé")) {
+        levelsByGroup[group] = ["Technicien spécialisé"];
+      }
+    });
+
+    return levelsByGroup;
+  };
+
+  // Get formation levels by group for display
+  const formationLevelsByGroup = getFormationLevelsByGroup();
+
+  // Function to get filiere (category) from group name
   const getFiliere = (group: string) => {
     if (group.startsWith("DEVOWFS")) return "DEVOWFS";
     if (group.startsWith("IDOSR")) return "IDOSR";
     if (group.startsWith("DEV")) return "DEV";
     if (group.startsWith("ID")) return "ID";
     return "Autre";
+  };
+
+  // Get unique filieres from STUDENT_GROUPS
+  const getUniqueFilieres = () => {
+    const filieres = STUDENT_GROUPS.map((group) => getFiliere(group));
+    return Array.from(new Set(filieres));
+  };
+
+  // Get groups by filiere
+  const getGroupsByFiliere = (filiere: string) => {
+    return STUDENT_GROUPS.filter((group) => getFiliere(group) === filiere);
   };
 
   if (loading) {
@@ -972,91 +1039,786 @@ export const StudentManagement = ({
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm shadow-lg border-b border-blue-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
-            <div className="flex items-center">
-              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-3 rounded-xl shadow-lg">
-                <Users className="h-8 w-8 text-white" />
-              </div>
-              <div className="ml-4">
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-700 to-indigo-700 bg-clip-text text-transparent">
-                  Gestion des Étudiants
-                </h1>
-                <p className="text-sm text-slate-600 font-medium">
-                  Gérer les étudiants par groupe
-                </p>
-              </div>
-            </div>
-            {onLogout ? (
-              <Button
-                onClick={onLogout}
-                variant="outline"
-                className="flex items-center gap-2 bg-white/80 hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800 transition-all duration-200"
-              >
-                <LogOut className="h-4 w-4" />
-                Déconnexion
-              </Button>
-            ) : (
-              <Button
-                onClick={onBack}
-                variant="outline"
-                className="flex items-center gap-2 bg-white/80 hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800 transition-all duration-200"
-              >
-                <X className="h-4 w-4" />
-                Retour au tableau de bord
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* Navigation Bar */}
-      <div className="bg-white/90 backdrop-blur-sm border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
-            <button
-              onClick={onBack}
-              className="py-4 px-1 border-b-2 border-transparent text-slate-500 font-medium text-sm transition-colors duration-200 hover:text-slate-700 hover:border-slate-300 flex items-center gap-2"
-            >
-              <FileText className="h-4 w-4" />
-              Gestion des Demandes
-            </button>
-            <button className="py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm transition-colors duration-200 flex items-center gap-2 cursor-default">
-              <User className="h-4 w-4" />
-              Gestion des Étudiants
-            </button>
-          </div>
+      {/* Statistics Section */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">
+                    Total Étudiants
+                  </p>
+                  <p className="text-2xl font-bold text-slate-900">
+                    {students.length}
+                  </p>
+                </div>
+                <div className="p-3 bg-blue-100 rounded-full">
+                  <Users className="h-6 w-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Groupes</p>
+                  <p className="text-2xl font-bold text-slate-900">
+                    {STUDENT_GROUPS.length}
+                  </p>
+                </div>
+                <div className="p-3 bg-green-100 rounded-full">
+                  <Users className="h-6 w-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Filtrés</p>
+                  <p className="text-2xl font-bold text-slate-900">
+                    {filteredStudents.length}
+                  </p>
+                </div>
+                <div className="p-3 bg-purple-100 rounded-full">
+                  <Filter className="h-6 w-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Niveaux</p>
+                  <p className="text-2xl font-bold text-slate-900">
+                    {Object.keys(formationLevelsByGroup).length}
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-100 rounded-full">
+                  <Settings className="h-6 w-6 text-amber-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filters and Actions */}
-        <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
-            <CardTitle className="flex items-center gap-2 text-slate-700">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Filter className="h-5 w-5 text-blue-600" />
-              </div>
-              Filtres et Actions
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Vertical Navbar for Groups with Pagination */}
+          <div className="w-full lg:w-64 flex-shrink-0">
+            <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg sticky top-24">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Users className="h-5 w-5 text-blue-600" />
+                  </div>
+                  Groupes
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {/* Pagination Controls */}
+                <div className="p-2 border-b border-slate-200">
+                  <div className="flex flex-wrap gap-1">
+                    {getUniqueFilieres().map((filiere) => (
+                      <Button
+                        key={filiere}
+                        variant={
+                          currentPage === filiere ? "default" : "outline"
+                        }
+                        size="sm"
+                        className={`text-xs px-2 py-1 h-auto ${
+                          currentPage === filiere
+                            ? "bg-blue-600 hover:bg-blue-700"
+                            : "bg-white hover:bg-blue-50"
+                        }`}
+                        onClick={() => setCurrentPage(filiere)}
+                      >
+                        {filiere}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* All Groups Button */}
+                <div className="p-4 border-b border-slate-200">
+                  <Button
+                    variant={selectedGroup === "all" ? "default" : "outline"}
+                    className={`w-full justify-between mb-2 ${
+                      selectedGroup === "all"
+                        ? "bg-blue-600 hover:bg-blue-700"
+                        : "bg-white hover:bg-blue-50"
+                    }`}
+                    onClick={() => setSelectedGroup("all")}
+                  >
+                    <span>Tous les groupes</span>
+                    <Badge
+                      variant="secondary"
+                      className={
+                        selectedGroup === "all"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-slate-100 text-slate-800"
+                      }
+                    >
+                      {students.length}
+                    </Badge>
+                  </Button>
+                </div>
+
+                {/* Group List with Pagination */}
+                <div className="border-t border-slate-200 max-h-96 overflow-y-auto">
+                  {getGroupsByFiliere(currentPage).map((group) => {
+                    const groupStudents = students.filter(
+                      (student) => student.student_group === group
+                    );
+                    return (
+                      <Button
+                        key={group}
+                        variant={selectedGroup === group ? "default" : "ghost"}
+                        className={`w-full justify-between rounded-none border-b border-slate-100 ${
+                          selectedGroup === group
+                            ? "bg-blue-50 hover:bg-blue-100 text-blue-700"
+                            : "hover:bg-slate-50"
+                        }`}
+                        onClick={() => setSelectedGroup(group)}
+                      >
+                        <span className="font-medium">{group}</span>
+                        <Badge
+                          variant="secondary"
+                          className={
+                            selectedGroup === group
+                              ? "bg-blue-100 text-blue-800"
+                              : "bg-slate-100 text-slate-800"
+                          }
+                        >
+                          {groupStudents.length}
+                        </Badge>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Main Content Area */}
+          <div className="flex-1 w-full min-w-0 max-w-full">
+            {/* Formation Levels by Group Section */}
+
+            {/* Filters and Actions */}
+            <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Filter className="h-5 w-5 text-blue-600" />
+                  </div>
+                  Filtres et Actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="search"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      Recherche
+                    </Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <Input
+                        placeholder="Nom, prénom, CIN, email..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 bg-white border-slate-200 hover:border-blue-300 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700">
+                      Exporter
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={exportToJSON}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2 bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span className="hidden sm:inline">JSON</span>
+                      </Button>
+                      <Button
+                        onClick={exportToPDF}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span className="hidden sm:inline">PDF</span>
+                      </Button>
+                      <Button
+                        onClick={exportToExcel}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2 bg-green-50 border-green-200 text-green-700 hover:bg-green-100 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span className="hidden sm:inline">Excel</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2 lg:col-span-1">
+                    <Label className="text-sm font-medium text-slate-700">
+                      Actions
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={() => setAddingStudent(true)}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span className="hidden sm:inline">Ajouter</span>
+                      </Button>
+                      <Button
+                        onClick={() => setShowCSVImport(true)}
+                        variant="outline"
+                        className="flex items-center gap-2 border-green-200 text-green-700 hover:bg-green-50"
+                      >
+                        <Upload className="h-4 w-4" />
+                        <span className="hidden sm:inline">Import CSV</span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Add Student Form */}
+            {addingStudent && (
+              <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+                <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2 text-slate-700">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Plus className="h-5 w-5 text-blue-600" />
+                    </div>
+                    Ajouter un nouvel étudiant
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Prénom *
+                      </Label>
+                      <Input
+                        value={newStudent.first_name}
+                        onChange={(e) =>
+                          setNewStudent({
+                            ...newStudent,
+                            first_name: e.target.value,
+                          })
+                        }
+                        placeholder="Prénom"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Nom *
+                      </Label>
+                      <Input
+                        value={newStudent.last_name}
+                        onChange={(e) =>
+                          setNewStudent({
+                            ...newStudent,
+                            last_name: e.target.value,
+                          })
+                        }
+                        placeholder="Nom"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        CIN *
+                      </Label>
+                      <Input
+                        value={newStudent.cin}
+                        onChange={(e) =>
+                          setNewStudent({ ...newStudent, cin: e.target.value })
+                        }
+                        placeholder="CIN"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Email *
+                      </Label>
+                      <Input
+                        value={newStudent.email}
+                        onChange={(e) => {
+                          const email = e.target.value;
+                          // Extract the part before @ for inscription number
+                          const inscriptionNumber = email.split("@")[0] || "";
+                          setNewStudent({
+                            ...newStudent,
+                            email: email,
+                            inscription_number: inscriptionNumber,
+                          });
+                        }}
+                        placeholder="Email"
+                        type="email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Date de naissance *
+                      </Label>
+                      <Input
+                        value={newStudent.birth_date}
+                        onChange={(e) =>
+                          setNewStudent({
+                            ...newStudent,
+                            birth_date: e.target.value,
+                          })
+                        }
+                        type="date"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        N° d'inscription *
+                      </Label>
+                      <Input
+                        value={newStudent.inscription_number}
+                        readOnly
+                        placeholder="N° d'inscription"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Niveau de formation *
+                      </Label>
+                      <Select
+                        value={newStudent.formation_level}
+                        onValueChange={(value) =>
+                          setNewStudent({
+                            ...newStudent,
+                            formation_level: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionner un niveau" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Technicien spécialisé">
+                            Technicien spécialisé
+                          </SelectItem>
+                          <SelectItem value="Technicien">Technicien</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Spécialité *
+                      </Label>
+                      <Select
+                        value={newStudent.speciality}
+                        onValueChange={(value) =>
+                          setNewStudent({
+                            ...newStudent,
+                            speciality: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionner une spécialité" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Développement Digital option web full stack (2A)">
+                            Développement Digital option web full stack (2A)
+                          </SelectItem>
+                          <SelectItem value="Developement digital">
+                            Developement digital
+                          </SelectItem>
+                          <SelectItem value="infrastructure digital">
+                            infrastructure digital
+                          </SelectItem>
+                          <SelectItem value="Réseaux et systèmes">
+                            Réseaux et systèmes
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Groupe *
+                      </Label>
+                      <Select
+                        value={newStudent.student_group}
+                        onValueChange={(value) =>
+                          setNewStudent({ ...newStudent, student_group: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionner un groupe" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STUDENT_GROUPS.map((group) => (
+                            <SelectItem key={group} value={group}>
+                              {group}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Type de formation *
+                      </Label>
+                      <Input
+                        value="Résidentielle"
+                        readOnly
+                        placeholder="Rempli automatiquement à partir de l'email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Mode de formation *
+                      </Label>
+                      <Select
+                        value={newStudent.formation_mode}
+                        onValueChange={(value) =>
+                          setNewStudent({
+                            ...newStudent,
+                            formation_mode: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionner un mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Diplômant">Diplômant</SelectItem>
+                          <SelectItem value="qualifiant">qualifiant</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Année de formation *
+                      </Label>
+                      <Input
+                        value={newStudent.formation_year}
+                        readOnly
+                        placeholder="Année de formation"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Mot de passe
+                      </Label>
+                      <Input
+                        type="password"
+                        value={newStudent.password_hash || ""}
+                        onChange={(e) =>
+                          setNewStudent({
+                            ...newStudent,
+                            password_hash: e.target.value,
+                          })
+                        }
+                        placeholder="Mot de passe de l'étudiant"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-6">
+                    <Button
+                      onClick={() => setAddingStudent(false)}
+                      variant="outline"
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      onClick={handleAddStudent}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Ajouter l'étudiant
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Students Table */}
+            <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <User className="h-5 w-5 text-blue-600" />
+                  </div>
+                  Liste des Étudiants ({filteredStudents.length})
+                </CardTitle>
+                <CardDescription className="text-slate-600">
+                  Gérez les étudiants par groupe
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="overflow-x-auto -mx-6 px-6 -my-4 py-4">
+                  <div className="min-w-full inline-block align-middle">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gradient-to-r from-slate-50 to-blue-50 hover:bg-slate-50">
+                          <TableHead className="font-semibold text-slate-700 min-w-[150px]">
+                            Étudiant
+                          </TableHead>
+                          <TableHead className="font-semibold text-slate-700 min-w-[100px]">
+                            CIN
+                          </TableHead>
+                          <TableHead className="font-semibold text-slate-700 min-w-[200px]">
+                            Email
+                          </TableHead>
+                          <TableHead className="font-semibold text-slate-700 min-w-[120px]">
+                            N° d'inscription
+                          </TableHead>
+                          <TableHead className="font-semibold text-slate-700 min-w-[150px]">
+                            Formation
+                          </TableHead>
+                          <TableHead className="font-semibold text-slate-700 min-w-[120px]">
+                            Actions
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredStudents.map((student) => (
+                          <TableRow
+                            key={student.id}
+                            className="hover:bg-blue-50/50 transition-colors duration-200"
+                          >
+                            <TableCell className="font-medium text-slate-800">
+                              {student.first_name} {student.last_name}
+                              <div className="text-xs text-slate-500">
+                                {new Date(
+                                  student.birth_date
+                                ).toLocaleDateString("fr-FR")}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-slate-600">
+                              {student.cin}
+                            </TableCell>
+                            <TableCell className="text-slate-600">
+                              {student.email}
+                            </TableCell>
+                            <TableCell className="text-slate-600">
+                              {student.inscription_number}
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">
+                                <div className="font-medium">
+                                  {student.formation_level}
+                                </div>
+                                <div className="text-slate-600">
+                                  {student.student_group}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  onClick={() => handleEditStudent(student)}
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  onClick={() =>
+                                    handleDeleteStudent(student.id)
+                                  }
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Student Edit Modal */}
+      <Dialog open={editingStudent !== null} onOpenChange={setEditingStudent}>
+        <DialogContent className="max-w-2xl p-8">
+          <DialogHeader className="space-y-4">
+            <DialogTitle>Modifier un Étudiant</DialogTitle>
+            <DialogDescription>
+              Veuillez remplir les informations suivantes pour modifier les
+              détails de l'étudiant.
+            </DialogDescription>
+          </DialogHeader>
+          {editingStudentForm && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label
-                  htmlFor="group"
-                  className="text-sm font-medium text-slate-700"
+                <Label>Prénom</Label>
+                <Input
+                  value={editingStudentForm.first_name}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      first_name: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nom</Label>
+                <Input
+                  value={editingStudentForm.last_name}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      last_name: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>CIN</Label>
+                <Input
+                  value={editingStudentForm.cin}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      cin: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input
+                  value={editingStudentForm.email}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      email: e.target.value,
+                    })
+                  }
+                  type="email"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Date de naissance</Label>
+                <Input
+                  value={editingStudentForm.birth_date}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      birth_date: e.target.value,
+                    })
+                  }
+                  type="date"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>N° d'inscription</Label>
+                <Input value={editingStudentForm.inscription_number} readOnly />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Niveau de formation</Label>
+                <Select
+                  value={editingStudentForm.formation_level}
+                  onValueChange={(value) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      formation_level: value,
+                    })
+                  }
                 >
-                  Groupe
-                </Label>
-                <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger className="bg-white border-slate-200 hover:border-blue-300 transition-colors">
-                    <SelectValue placeholder="Tous les groupes" />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sélectionner un niveau" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white border shadow-xl z-50 rounded-lg">
-                    <SelectItem value="all">Tous les groupes</SelectItem>
+                  <SelectContent>
+                    <SelectItem value="Technicien spécialisé">
+                      Technicien spécialisé
+                    </SelectItem>
+                    <SelectItem value="Technicien">Technicien</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Spécialité</Label>
+                <Select
+                  value={editingStudentForm.speciality}
+                  onValueChange={(value) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      speciality: value,
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sélectionner une spécialité" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Développement Digital option web full stack (2A)">
+                      Développement Digital option web full stack (2A)
+                    </SelectItem>
+                    <SelectItem value="Developement digital">
+                      Developement digital
+                    </SelectItem>
+                    <SelectItem value="infrastructure digital">
+                      infrastructure digital
+                    </SelectItem>
+                    <SelectItem value="Réseaux et systèmes">
+                      Réseaux et systèmes
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Groupe</Label>
+                <Select
+                  value={editingStudentForm.student_group}
+                  onValueChange={(value) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      student_group: value,
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sélectionner un groupe" />
+                  </SelectTrigger>
+                  <SelectContent>
                     {STUDENT_GROUPS.map((group) => (
                       <SelectItem key={group} value={group}>
                         {group}
@@ -1067,687 +1829,111 @@ export const StudentManagement = ({
               </div>
 
               <div className="space-y-2">
-                <Label
-                  htmlFor="search"
-                  className="text-sm font-medium text-slate-700"
+                <Label>Type de formation</Label>
+                <Input value="Résidentielle" readOnly />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Mode de formation</Label>
+                <Select
+                  value={editingStudentForm.formation_mode}
+                  onValueChange={(value) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      formation_mode: value,
+                    })
+                  }
                 >
-                  Recherche
-                </Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Nom, prénom, CIN, email..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 bg-white border-slate-200 hover:border-blue-300 transition-colors"
-                  />
-                </div>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sélectionner un mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Diplômant">Diplômant</SelectItem>
+                    <SelectItem value="qualifiant">qualifiant</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-slate-700">
-                  Exporter
-                </Label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button
-                    onClick={exportToJSON}
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2 bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 transition-colors w-full sm:w-auto"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span className="hidden sm:inline">JSON</span>
-                  </Button>
-                  <Button
-                    onClick={exportToPDF}
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors w-full sm:w-auto"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span className="hidden sm:inline">PDF</span>
-                  </Button>
-                  <Button
-                    onClick={exportToExcel}
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center gap-2 bg-green-50 border-green-200 text-green-700 hover:bg-green-100 transition-colors w-full sm:w-auto"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span className="hidden sm:inline">Excel</span>
-                  </Button>
-                </div>
+                <Label>Année de formation</Label>
+                <Input value={editingStudentForm.formation_year} readOnly />
               </div>
 
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-slate-700">
-                  Actions
-                </Label>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    onClick={() => setAddingStudent(true)}
-                    className="flex items-center gap-2 w-full"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span className="hidden sm:inline">Ajouter</span>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Add Student Form */}
-        {addingStudent && (
-          <Card className="mb-8 bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Plus className="h-5 w-5 text-blue-600" />
-                </div>
-                Ajouter un nouvel étudiant
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Prénom *
-                  </Label>
-                  <Input
-                    value={newStudent.first_name}
-                    onChange={(e) =>
-                      setNewStudent({
-                        ...newStudent,
-                        first_name: e.target.value,
-                      })
-                    }
-                    placeholder="Prénom"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Nom *
-                  </Label>
-                  <Input
-                    value={newStudent.last_name}
-                    onChange={(e) =>
-                      setNewStudent({
-                        ...newStudent,
-                        last_name: e.target.value,
-                      })
-                    }
-                    placeholder="Nom"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    CIN *
-                  </Label>
-                  <Input
-                    value={newStudent.cin}
-                    onChange={(e) =>
-                      setNewStudent({ ...newStudent, cin: e.target.value })
-                    }
-                    placeholder="CIN"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Email *
-                  </Label>
-                  <Input
-                    value={newStudent.email}
-                    onChange={(e) => {
-                      const email = e.target.value;
-                      // Extract the part before @ for inscription number
-                      const inscriptionNumber = email.split("@")[0] || "";
-                      setNewStudent({
-                        ...newStudent,
-                        email: email,
-                        inscription_number: inscriptionNumber,
-                      });
-                    }}
-                    placeholder="Email"
-                    type="email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Date de naissance *
-                  </Label>
-                  <Input
-                    value={newStudent.birth_date}
-                    onChange={(e) =>
-                      setNewStudent({
-                        ...newStudent,
-                        birth_date: e.target.value,
-                      })
-                    }
-                    type="date"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    N° d'inscription *
-                  </Label>
-                  <Input
-                    value={newStudent.inscription_number}
-                    readOnly
-                    placeholder="N° d'inscription"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Niveau de formation *
-                  </Label>
-                  <Select
-                    value={newStudent.formation_level}
-                    onValueChange={(value) =>
-                      setNewStudent({
-                        ...newStudent,
-                        formation_level: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un niveau" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Technicien spécialisé">
-                        Technicien spécialisé
-                      </SelectItem>
-                      <SelectItem value="Technicien">Technicien</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Spécialité *
-                  </Label>
-                  <Select
-                    value={newStudent.speciality}
-                    onValueChange={(value) =>
-                      setNewStudent({
-                        ...newStudent,
-                        speciality: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner une spécialité" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Développement Digital option web full stack (2A)">
-                        Développement Digital option web full stack (2A)
-                      </SelectItem>
-                      <SelectItem value="Developement digital">
-                        Developement digital
-                      </SelectItem>
-                      <SelectItem value="infrastructure digital">
-                        infrastructure digital
-                      </SelectItem>
-                      <SelectItem value="Réseaux et systèmes">
-                        Réseaux et systèmes
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Groupe *
-                  </Label>
-                  <Select
-                    value={newStudent.student_group}
-                    onValueChange={(value) =>
-                      setNewStudent({ ...newStudent, student_group: value })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un groupe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STUDENT_GROUPS.map((group) => (
-                        <SelectItem key={group} value={group}>
-                          {group}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Type de formation *
-                  </Label>
-                  <Input
-                    value="Résidentielle"
-                    readOnly
-                    placeholder="Rempli automatiquement à partir de l'email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Mode de formation *
-                  </Label>
-                  <Select
-                    value={newStudent.formation_mode}
-                    onValueChange={(value) =>
-                      setNewStudent({
-                        ...newStudent,
-                        formation_mode: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Diplômant">Diplômant</SelectItem>
-                      <SelectItem value="qualifiant">qualifiant</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Année de formation *
-                  </Label>
-                  <Input
-                    value={newStudent.formation_year}
-                    readOnly
-                    placeholder="Année de formation"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-slate-700">
-                    Mot de passe
-                  </Label>
-                  <Input
-                    type="password"
-                    value={newStudent.password_hash || ""}
-                    onChange={(e) =>
-                      setNewStudent({
-                        ...newStudent,
-                        password_hash: e.target.value,
-                      })
-                    }
-                    placeholder="Mot de passe de l'étudiant"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-6">
+                <Label>Mot de passe actuel</Label>
+                <Input
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={editingStudentForm.current_password}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      current_password: e.target.value,
+                    })
+                  }
+                />
                 <Button
-                  onClick={() => setAddingStudent(false)}
                   variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                 >
-                  Annuler
+                  {showCurrentPassword ? "Masquer" : "Afficher"}
                 </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nouveau mot de passe</Label>
+                <Input
+                  type={showNewPassword ? "text" : "password"}
+                  value={editingStudentForm.new_password}
+                  onChange={(e) =>
+                    setEditingStudentForm({
+                      ...editingStudentForm,
+                      new_password: e.target.value,
+                    })
+                  }
+                />
                 <Button
-                  onClick={handleAddStudent}
-                  className="bg-blue-600 hover:bg-blue-700"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
                 >
-                  Ajouter l'étudiant
+                  {showNewPassword ? "Masquer" : "Afficher"}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Students Table */}
-        <Card className="bg-white/80 backdrop-blur-sm border-slate-200 shadow-lg">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-lg">
-            <CardTitle className="flex items-center gap-2 text-slate-700">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <User className="h-5 w-5 text-blue-600" />
-              </div>
-              Liste des Étudiants ({filteredStudents.length})
-            </CardTitle>
-            <CardDescription className="text-slate-600">
-              Gérez les étudiants par groupe
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gradient-to-r from-slate-50 to-blue-50 hover:bg-slate-50">
-                    <TableHead className="font-semibold text-slate-700 min-w-[150px]">
-                      Étudiant
-                    </TableHead>
-                    <TableHead className="font-semibold text-slate-700 min-w-[100px]">
-                      CIN
-                    </TableHead>
-                    <TableHead className="font-semibold text-slate-700 min-w-[200px]">
-                      Email
-                    </TableHead>
-                    <TableHead className="font-semibold text-slate-700 min-w-[120px]">
-                      N° d'inscription
-                    </TableHead>
-                    <TableHead className="font-semibold text-slate-700 min-w-[150px]">
-                      Formation
-                    </TableHead>
-                    <TableHead className="font-semibold text-slate-700 min-w-[120px]">
-                      Actions
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredStudents.map((student) => (
-                    <TableRow
-                      key={student.id}
-                      className="hover:bg-blue-50/50 transition-colors duration-200"
-                    >
-                      <TableCell className="font-medium text-slate-800">
-                        {student.first_name} {student.last_name}
-                        <div className="text-xs text-slate-500">
-                          {new Date(student.birth_date).toLocaleDateString(
-                            "fr-FR"
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-slate-600">
-                        {student.cin}
-                      </TableCell>
-                      <TableCell className="text-slate-600">
-                        {student.email}
-                      </TableCell>
-                      <TableCell className="text-slate-600">
-                        {student.inscription_number}
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div className="font-medium">
-                            {student.formation_level}
-                          </div>
-                          <div className="text-slate-600">
-                            {student.student_group}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            onClick={() => handleEditStudent(student)}
-                            size="sm"
-                            variant="outline"
-                            className="h-8 w-8 p-0"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            onClick={() => handleDeleteStudent(student.id)}
-                            size="sm"
-                            variant="outline"
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
             </div>
-          </CardContent>
-        </Card>
+          )}
 
-        {/* Student Edit Modal */}
-        <Dialog
-          open={!!editingStudent}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditingStudent(null);
-              setEditingStudentForm(null);
-            }
-          }}
-        >
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Modifier les informations de l'étudiant</DialogTitle>
-            </DialogHeader>
+          <DialogFooter className="mt-6">
+            <Button
+              onClick={() => {
+                setEditingStudent(null);
+                setEditingStudentForm(null);
+              }}
+              variant="outline"
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={handleSaveStudent}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Enregistrer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-            {editingStudentForm && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="first_name">Prénom</Label>
-                  <Input
-                    id="first_name"
-                    value={editingStudentForm.first_name}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        first_name: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="last_name">Nom</Label>
-                  <Input
-                    id="last_name"
-                    value={editingStudentForm.last_name}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        last_name: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="cin">CIN</Label>
-                  <Input
-                    id="cin"
-                    value={editingStudentForm.cin}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        cin: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={editingStudentForm.email}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        email: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="birth_date">Date de naissance</Label>
-                  <Input
-                    id="birth_date"
-                    type="date"
-                    value={editingStudentForm.birth_date}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        birth_date: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="inscription_number">N° d'inscription</Label>
-                  <Input
-                    id="inscription_number"
-                    value={editingStudentForm.inscription_number}
-                    readOnly
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Niveau de formation</Label>
-                  <Select
-                    value={editingStudentForm.formation_level}
-                    onValueChange={(value) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        formation_level: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un niveau" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Technicien spécialisé">
-                        Technicien spécialisé
-                      </SelectItem>
-                      <SelectItem value="Technicien">Technicien</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Spécialité</Label>
-                  <Select
-                    value={editingStudentForm.speciality}
-                    onValueChange={(value) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        speciality: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner une spécialité" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Développement Digital option web full stack (2A)">
-                        Développement Digital option web full stack (2A)
-                      </SelectItem>
-                      <SelectItem value="Developement digital">
-                        Developement digital
-                      </SelectItem>
-                      <SelectItem value="infrastructure digital">
-                        infrastructure digital
-                      </SelectItem>
-                      <SelectItem value="Réseaux et systèmes">
-                        Réseaux et systèmes
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Groupe</Label>
-                  <Select
-                    value={editingStudentForm.student_group}
-                    onValueChange={(value) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        student_group: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un groupe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STUDENT_GROUPS.map((group) => (
-                        <SelectItem key={group} value={group}>
-                          {group}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Type de formation</Label>
-                  <Input value="Résidentielle" readOnly />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Mode de formation</Label>
-                  <Select
-                    value={editingStudentForm.formation_mode}
-                    onValueChange={(value) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        formation_mode: value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Diplômant">Diplômant</SelectItem>
-                      <SelectItem value="qualifiant">qualifiant</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Année de formation</Label>
-                  <Input value={editingStudentForm.formation_year} readOnly />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Mot de passe actuel</Label>
-                  <Input
-                    type="password"
-                    value={editingStudentForm.current_password}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        current_password: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Nouveau mot de passe</Label>
-                  <Input
-                    type="password"
-                    value={editingStudentForm.new_password}
-                    onChange={(e) =>
-                      setEditingStudentForm({
-                        ...editingStudentForm,
-                        new_password: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            )}
-
-            <DialogFooter className="mt-6">
-              <Button
-                onClick={() => {
-                  setEditingStudent(null);
-                  setEditingStudentForm(null);
-                }}
-                variant="outline"
-              >
-                Annuler
-              </Button>
-              <Button
-                onClick={handleSaveStudent}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                Enregistrer
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+      {/* CSV Import Dialog */}
+      <CSVImportDialog
+        open={showCSVImport}
+        onOpenChange={setShowCSVImport}
+        onImportSuccess={() => {
+          fetchStudents();
+          setShowCSVImport(false);
+        }}
+      />
     </div>
   );
 };
